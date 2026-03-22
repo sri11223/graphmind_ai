@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import GraphCanvas from "./components/GraphCanvas";
 import ChatPanel from "./components/ChatPanel";
 import NodeInspector from "./components/NodeInspector";
+import SearchBar from "./components/SearchBar";
 import { getGraphData, getGraphStats } from "./services/api";
 import type { GraphData, GraphStats, GraphNode } from "./types";
 import { ENTITY_COLORS } from "./types";
@@ -88,9 +89,17 @@ export default function App() {
             />
           )}
 
+          {/* Search bar */}
+          <SearchBar
+            onSelect={(nodeId) => {
+              const node = graphData?.nodes.find((n) => n.id === nodeId);
+              if (node) setSelectedNode(node);
+            }}
+          />
+
           {/* Legend overlay */}
           {showLegend && (
-            <div className="absolute top-3 left-3 bg-white/95 backdrop-blur rounded-lg shadow-md px-3 py-2.5 z-10">
+            <div className="absolute bottom-3 left-3 bg-white/95 backdrop-blur rounded-lg shadow-md px-3 py-2.5 z-10">
               <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Entity Types</p>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                 {Object.entries(ENTITY_COLORS).map(([type, color]) => (

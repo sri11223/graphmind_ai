@@ -5,14 +5,16 @@ Startup sequence:
   2. Ingest JSONL data from sap-o2c-data/
   3. Build in-memory NetworkX graph
   4. Wire up LLM + query engine
-  5. Serve API
+  5. Serve API + static frontend (production)
 """
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import DATA_DIR, DB_PATH, CORS_ORIGINS
 from .database import init_db, get_table_stats
@@ -83,3 +85,19 @@ app.include_router(chat_router.router)
 @app.get("/api/health")
 def health():
     return {"status": "ok", "graph": graph_engine.get_stats()}
+
+
+# Serve built frontend in production (after API routes so /api/* takes priority)
+_STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if _STATIC_DIR.is_dir():
+    from fastapi.responses import FileResponse
+
+    app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Catch-all: serve index.html for client-side routing."""
+        file_path = _STATIC_DIR / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(_STATIC_DIR / "index.html")

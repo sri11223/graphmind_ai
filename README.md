@@ -139,6 +139,22 @@ npm run dev
 
 Open **http://localhost:5173** — the Vite dev server proxies `/api` requests to the backend.
 
+### 3. Docker (Production)
+
+```bash
+docker build -t graphmind-ai .
+docker run -p 8000:8000 -e GEMINI_API_KEY=your_key_here graphmind-ai
+```
+
+Open **http://localhost:8000** — the backend serves the built React frontend.
+
+### 4. Deploy to Render.com
+
+1. Push to GitHub
+2. On [Render](https://render.com), click **New → Web Service → Connect your repo**
+3. Render auto-detects `render.yaml` — just add `GEMINI_API_KEY` as an environment variable
+4. Deploy — your live URL will be `https://graphmind-ai.onrender.com`
+
 ---
 
 ## Example Queries
@@ -178,11 +194,15 @@ Open **http://localhost:5173** — the Vite dev server proxies `/api` requests t
 │   │   ├── components/
 │   │   │   ├── GraphCanvas.tsx    # Force-directed graph
 │   │   │   ├── ChatPanel.tsx      # Conversational interface
-│   │   │   └── NodeInspector.tsx  # Node detail overlay
+│   │   │   ├── NodeInspector.tsx  # Node detail overlay
+│   │   │   └── SearchBar.tsx      # Debounced graph node search
 │   │   ├── services/api.ts   # API client
 │   │   └── types/index.ts    # TypeScript types
 │   ├── package.json
 │   └── vite.config.ts
+├── Dockerfile                 # Multi-stage Docker build
+├── render.yaml                # Render.com deployment config
+├── .dockerignore
 ├── .env.example
 ├── .gitignore
 └── README.md
