@@ -1,14 +1,15 @@
 """GraphMind AI — LLM Engine
 
-Google Gemini integration for natural-language → SQL translation
-and result interpretation.
+Groq integration via OpenAI-compatible API for:
+  - Natural-language → SQL translation
+  - Result interpretation (with streaming support)
 """
 
 import json
 import logging
 import re
-import google.generativeai as genai
-from .config import GEMINI_API_KEY, GEMINI_MODEL
+from openai import OpenAI
+from .config import GROQ_API_KEY, GROQ_MODEL, GROQ_BASE_URL
 from .database import get_schema_description
 
 log = logging.getLogger(__name__)
@@ -59,22 +60,12 @@ Rules:
 
 class LLMEngine:
     def __init__(self):
-        if not GEMINI_API_KEY:
-            log.warning("GEMINI_API_KEY not set — LLM features will be unavailable")
-            self.model = None
+        if not GROQ_API_KEY:
+            log.warning("GROQ_API_KEY not set — LLM features will be unavailable")
+            self.client = None
             return
-        genai.configure(api_key=GEMINI_API_KEY)
-        self.model = genai.GenerativeModel(
-            GEMINI_MODEL,
-            generation_config=genai.GenerationConfig(
-                temperature=0.1,
-                response_mime_type="application/json",
-            ),
-        )
-        self.interpret_model = genai.GenerativeModel(
-            GEMINI_MODEL,
-            generation_config=genai.GenerationConfig(temperature=0.3),
-        )
+        self.client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_BASE_URL)
+        self.model = GROQ_MODEL
         self._schema = get_schema_description()
 
     # ------------------------------------------------------------------
@@ -86,27 +77,28 @@ class LLMEngine:
 
         Returns dict with keys: is_relevant, sql, explanation  OR  is_relevant, refusal
         """
-        if self.model is None:
-            return {"is_relevant": False, "refusal": "LLM not configured. Set GEMINI_API_KEY."}
+        if self.client is None:
+            return {"is_relevant": False, "refusal": "LLM not configured. Set GROQ_API_KEY."}
 
         system = _SQL_SYSTEM.format(schema=self._schema)
-        messages = [{"role": "user", "parts": [system]}]
-        messages.append({"role": "model", "parts": ["Understood. I will generate SQL for O2C questions and refuse off-topic ones. Send me a question."]})
+        messages: list[dict] = [{"role": "system", "content": system}]
 
-        # Inject conversation history for context
         if history:
-            for msg in history[-6:]:  # keep last 3 exchanges
-                role = "user" if msg["role"] == "user" else "model"
-                messages.append({"role": role, "parts": [msg["content"]]})
+            for msg in history[-6:]:
+                messages.append({"role": msg["role"], "content": msg["content"]})
 
-        messages.append({"role": "user", "parts": [question]})
+        messages.append({"role": "user", "content": question})
 
         try:
-            response = self.model.generate_content(messages)
-            text = response.text.strip()
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.1,
+                response_format={"type": "json_object"},
+            )
+            text = (response.choices[0].message.content or "").strip()
             return json.loads(text)
         except json.JSONDecodeError:
-            # Try to extract JSON from a markdown-fenced response
             match = re.search(r"\{.*\}", text, re.DOTALL)
             if match:
                 return json.loads(match.group())
@@ -121,27 +113,65 @@ class LLMEngine:
         self, question: str, sql: str, results: list[dict]
     ) -> str:
         """Turn raw SQL results into a natural-language answer."""
-        if self.interpret_model is None:
+        if self.client is None:
             return self._fallback_format(results)
 
-        # Truncate large result sets for the LLM context
-        display_results = results[:50]
-        prompt = (
-            f"{_INTERPRET_SYSTEM}\n\n"
-            f"**User question:** {question}\n\n"
-            f"**SQL query:** `{sql}`\n\n"
-            f"**Results ({len(results)} rows, showing first {len(display_results)}):**\n"
-            f"```json\n{json.dumps(display_results, indent=2, default=str)}\n```\n\n"
-            "Provide a clear, data-driven answer."
-        )
+        prompt = self._build_interpret_prompt(question, sql, results)
         try:
-            response = self.interpret_model.generate_content(prompt)
-            return response.text.strip()
-        except Exception as exc:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": _INTERPRET_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+            )
+            return (response.choices[0].message.content or "").strip()
+        except Exception:
             log.exception("LLM interpretation failed")
             return self._fallback_format(results)
 
     # ------------------------------------------------------------------
+
+    def stream_interpret(
+        self, question: str, sql: str, results: list[dict]
+    ):
+        """Generator yielding text chunks of the interpretation (for streaming)."""
+        if self.client is None:
+            yield self._fallback_format(results)
+            return
+
+        prompt = self._build_interpret_prompt(question, sql, results)
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": _INTERPRET_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                stream=True,
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        except Exception:
+            log.exception("LLM streaming failed")
+            yield self._fallback_format(results)
+
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_interpret_prompt(question: str, sql: str, results: list[dict]) -> str:
+        display = results[:50]
+        return (
+            f"**User question:** {question}\n\n"
+            f"**SQL query:** `{sql}`\n\n"
+            f"**Results ({len(results)} rows, showing first {len(display)}):**\n"
+            f"```json\n{json.dumps(display, indent=2, default=str)}\n```\n\n"
+            "Provide a clear, data-driven answer."
+        )
 
     @staticmethod
     def _fallback_format(results: list[dict]) -> str:
@@ -150,7 +180,6 @@ class LLMEngine:
         if len(results) == 1 and len(results[0]) == 1:
             val = list(results[0].values())[0]
             return str(val)
-        # Simple markdown table
         headers = list(results[0].keys())
         lines = ["| " + " | ".join(headers) + " |"]
         lines.append("| " + " | ".join("---" for _ in headers) + " |")

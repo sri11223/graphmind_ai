@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
+import { useTheme } from "./providers/ThemeProvider";
 import type { GraphData, GraphNode } from "../types";
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function GraphCanvas({ data, onNodeClick, highlightNodes, selectedNode }: Props) {
+  const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
@@ -37,7 +39,6 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
   const handleNodeClick = useCallback(
     (node: any) => {
       onNodeClick(node as GraphNode);
-      // Centre on node
       fgRef.current?.centerAt(node.x, node.y, 300);
     },
     [onNodeClick]
@@ -47,6 +48,11 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
     (nodeId: string) => highlightNodes.size > 0 && highlightNodes.has(nodeId),
     [highlightNodes]
   );
+
+  const isDark = theme === "dark";
+  const bgColor = isDark ? "#0f1117" : "#fafbfc";
+  const labelColor = isDark ? "#e5e7eb" : "#1f2937";
+  const dimLabelColor = isDark ? "#6b7280" : "#9ca3af";
 
   const nodeCanvasObject = useCallback(
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -71,7 +77,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
       ctx.fill();
 
       if (isSelected) {
-        ctx.strokeStyle = "#1d4ed8";
+        ctx.strokeStyle = "#3b82f6";
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
@@ -83,22 +89,24 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
         ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillStyle = dimmed ? "#9ca3af" : "#1f2937";
+        ctx.fillStyle = dimmed ? dimLabelColor : labelColor;
         ctx.fillText(label, node.x!, node.y! + r + 2);
       }
     },
-    [selectedNode, highlightNodes, isHighlighted]
+    [selectedNode, highlightNodes, isHighlighted, labelColor, dimLabelColor]
   );
 
   const linkColor = useCallback(
     (link: any) => {
-      if (highlightNodes.size === 0) return "rgba(147,197,253,0.3)";
+      const base = isDark ? "rgba(59,130,246," : "rgba(147,197,253,";
+      if (highlightNodes.size === 0) return `${base}${isDark ? "0.2)" : "0.3)"}`;
       const srcId = typeof link.source === "object" ? link.source.id : link.source;
       const tgtId = typeof link.target === "object" ? link.target.id : link.target;
-      if (highlightNodes.has(srcId) || highlightNodes.has(tgtId)) return "rgba(59,130,246,0.6)";
-      return "rgba(147,197,253,0.08)";
+      if (highlightNodes.has(srcId) || highlightNodes.has(tgtId))
+        return "rgba(59,130,246,0.6)";
+      return `${base}${isDark ? "0.05)" : "0.08)"}`;
     },
-    [highlightNodes]
+    [highlightNodes, isDark]
   );
 
   // Memoize data to prevent re-rendering loops
@@ -127,7 +135,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
         cooldownTicks={200}
         d3AlphaDecay={0.03}
         d3VelocityDecay={0.4}
-        backgroundColor="#fafbfc"
+        backgroundColor={bgColor}
       />
     </div>
   );
