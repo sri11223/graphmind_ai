@@ -50,17 +50,40 @@ class QueryEngine:
                 "referencedNodes": [],
             }
 
-        # --- Step 2: Execute SQL ---
+        # --- Step 2: Execute SQL (with auto-retry on failure) ---
         try:
             results = execute_query(sql)
         except Exception as exc:
-            log.exception("SQL execution failed: %s", sql)
-            return {
-                "answer": f"Query execution error: {exc}. Try rephrasing your question.",
-                "sql": sql,
-                "data": None,
-                "referencedNodes": [],
-            }
+            log.warning("SQL execution failed, attempting auto-repair: %s", exc)
+            repair_out = self.llm.repair_sql(question, sql, str(exc))
+            repaired_sql = repair_out.get("sql", "")
+            if not repaired_sql or not repair_out.get("is_relevant", False):
+                return {
+                    "answer": f"Query execution error: {exc}. Try rephrasing your question.",
+                    "sql": sql,
+                    "data": None,
+                    "referencedNodes": [],
+                }
+            valid2, reason2 = validate_sql(repaired_sql)
+            if not valid2:
+                return {
+                    "answer": f"Query execution error: {exc}. Try rephrasing your question.",
+                    "sql": sql,
+                    "data": None,
+                    "referencedNodes": [],
+                }
+            try:
+                sql = repaired_sql
+                results = execute_query(sql)
+                log.info("Auto-repaired SQL succeeded")
+            except Exception as exc2:
+                log.exception("Repaired SQL also failed: %s", sql)
+                return {
+                    "answer": f"Query execution error: {exc2}. Try rephrasing your question.",
+                    "sql": sql,
+                    "data": None,
+                    "referencedNodes": [],
+                }
 
         # --- Step 3: LLM interprets results ---
         answer = self.llm.interpret_results(question, sql, results)

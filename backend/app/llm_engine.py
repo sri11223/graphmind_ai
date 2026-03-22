@@ -107,6 +107,49 @@ class LLMEngine:
             log.exception("LLM SQL generation failed")
             return {"is_relevant": False, "refusal": f"LLM error: {exc}"}
 
+    def repair_sql(
+        self, question: str, failed_sql: str, error_msg: str
+    ) -> dict:
+        """Ask the LLM to fix a SQL query that failed execution.
+
+        Sends the original question, the failed SQL, and the SQLite error message
+        back to the LLM so it can correct column names / table references.
+        """
+        if self.client is None:
+            return {"is_relevant": False, "refusal": "LLM not configured."}
+
+        system = _SQL_SYSTEM.format(schema=self._schema)
+        repair_prompt = (
+            f"The following SQL query FAILED with a SQLite error.\n\n"
+            f"**Original question:** {question}\n"
+            f"**Failed SQL:** {failed_sql}\n"
+            f"**Error:** {error_msg}\n\n"
+            f"Fix the SQL to use the CORRECT column and table names from the schema above. "
+            f"Pay special attention to: 'material' vs 'product', and which tables have 'referenceSdDocument'. "
+            f"Return the corrected query in the same JSON format."
+        )
+        messages: list[dict] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": repair_prompt},
+        ]
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.0,
+                response_format={"type": "json_object"},
+            )
+            text = (response.choices[0].message.content or "").strip()
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+            return {"is_relevant": False, "refusal": "Failed to repair SQL."}
+        except Exception as exc:
+            log.exception("LLM SQL repair failed")
+            return {"is_relevant": False, "refusal": f"LLM repair error: {exc}"}
+
     # ------------------------------------------------------------------
 
     def interpret_results(

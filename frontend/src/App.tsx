@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Sun, Moon, BarChart3 } from "lucide-react";
+import { Sun, Moon, BarChart3, Box, Layers } from "lucide-react";
 import GraphCanvas from "./components/GraphCanvas";
 import ChatPanel from "./components/ChatPanel";
 import NodeInspector from "./components/NodeInspector";
@@ -18,6 +18,7 @@ export default function App() {
   const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
+  const [mode3D, setMode3D] = useState(true);
 
   useEffect(() => {
     Promise.all([getGraphData(), getGraphStats()])
@@ -71,6 +72,9 @@ export default function App() {
                 </span>
               </>
             )}
+            <Button variant="ghost" size="sm" onClick={() => setMode3D(!mode3D)} icon={mode3D ? <Box size={14} /> : <Layers size={14} />}>
+              {mode3D ? "3D" : "2D"}
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowLegend(!showLegend)} icon={<BarChart3 size={14} />}>
               {showLegend ? "Hide" : "Show"} Legend
             </Button>
@@ -91,6 +95,7 @@ export default function App() {
               onNodeClick={handleNodeClick}
               highlightNodes={highlightNodes}
               selectedNode={selectedNode}
+              mode3D={mode3D}
             />
           )}
 

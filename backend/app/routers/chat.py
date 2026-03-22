@@ -25,6 +25,23 @@ def chat(req: ChatRequest):
     return ChatResponse(**result)
 
 
+@router.get("/suggestions")
+def suggestions():
+    """Return a list of example queries the user can try."""
+    return [
+        {"text": "Show me the top 10 customers by order value", "category": "Customers"},
+        {"text": "Which products have the most billing documents?", "category": "Products"},
+        {"text": "Trace the full O2C flow for sales order 740506", "category": "Flow"},
+        {"text": "Find orders that are delivered but not yet billed", "category": "Flow"},
+        {"text": "Show all cancelled billing documents", "category": "Billing"},
+        {"text": "What is the total revenue by sales organization?", "category": "Revenue"},
+        {"text": "List customers with overdue payments", "category": "Payments"},
+        {"text": "Show incomplete O2C flows missing billing or payment", "category": "Flow"},
+        {"text": "Which plants handle the most deliveries?", "category": "Logistics"},
+        {"text": "Compare order amounts vs billing amounts by customer", "category": "Analytics"},
+    ]
+
+
 @router.websocket("/stream")
 async def chat_stream(websocket: WebSocket):
     """WebSocket endpoint that streams the LLM interpretation step."""
@@ -73,19 +90,50 @@ async def chat_stream(websocket: WebSocket):
                 {"type": "sql", "sql": sql, "explanation": explanation}
             )
 
-            # Step 2: Execute SQL
+            # Step 2: Execute SQL (with auto-retry on failure)
             await websocket.send_json({"type": "status", "status": "Executing query…"})
             try:
                 results = execute_query(sql)
             except Exception as exc:
-                log.exception("SQL execution failed: %s", sql)
-                await websocket.send_json({
-                    "type": "done",
-                    "answer": f"Query execution error: {exc}. Try rephrasing.",
-                    "sql": sql,
-                    "referencedNodes": [],
-                })
-                continue
+                log.warning("SQL failed, attempting auto-repair: %s", exc)
+                await websocket.send_json({"type": "status", "status": "Fixing query…"})
+                repair_out = _engine.llm.repair_sql(question, sql, str(exc))
+                repaired_sql = repair_out.get("sql", "")
+                if repaired_sql and repair_out.get("is_relevant", False):
+                    valid2, _ = validate_sql(repaired_sql)
+                    if valid2:
+                        try:
+                            sql = repaired_sql
+                            results = execute_query(sql)
+                            log.info("Auto-repaired SQL succeeded")
+                            await websocket.send_json(
+                                {"type": "sql", "sql": sql, "explanation": "(auto-corrected) " + explanation}
+                            )
+                        except Exception as exc2:
+                            log.exception("Repaired SQL also failed: %s", sql)
+                            await websocket.send_json({
+                                "type": "done",
+                                "answer": f"Query execution error: {exc2}. Try rephrasing.",
+                                "sql": sql,
+                                "referencedNodes": [],
+                            })
+                            continue
+                    else:
+                        await websocket.send_json({
+                            "type": "done",
+                            "answer": f"Query execution error: {exc}. Try rephrasing.",
+                            "sql": sql,
+                            "referencedNodes": [],
+                        })
+                        continue
+                else:
+                    await websocket.send_json({
+                        "type": "done",
+                        "answer": f"Query execution error: {exc}. Try rephrasing.",
+                        "sql": sql,
+                        "referencedNodes": [],
+                    })
+                    continue
 
             await websocket.send_json({"type": "data", "rowCount": len(results)})
 

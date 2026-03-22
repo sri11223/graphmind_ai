@@ -528,78 +528,103 @@ GROUP BY soh.salesOrder;
 _SCHEMA_DESCRIPTION = """
 DATABASE: SAP Order-to-Cash (O2C) Analytics — SQLite
 
+╔═══════════════════════════════════════════════════════════════╗
+║  ⚠️  CRITICAL RULES — READ BEFORE GENERATING ANY SQL  ⚠️     ║
+╠═══════════════════════════════════════════════════════════════╣
+║ 1. The column for product ID in sales_order_items and        ║
+║    billing_document_items is called "material" NOT "product". ║
+║    Only the products table has a column called "product".     ║
+║ 2. referenceSdDocument is on ITEMS tables ONLY:              ║
+║    • outbound_delivery_ITEMS.referenceSdDocument (NOT headers)║
+║    • billing_document_ITEMS.referenceSdDocument (NOT headers) ║
+║    The headers tables do NOT have referenceSdDocument.        ║
+║ 3. To link deliveries to orders: JOIN outbound_delivery_items ║
+║    odi ON odi.referenceSdDocument = soh.salesOrder            ║
+║    Then JOIN outbound_delivery_headers odh                    ║
+║    ON odh.deliveryDocument = odi.deliveryDocument             ║
+║ 4. To link billing to deliveries: JOIN billing_document_items ║
+║    bdi ON bdi.referenceSdDocument = odi.deliveryDocument      ║
+║ 5. ALWAYS prefer the pre-built VIEWS for common queries.     ║
+║ 6. Use EXACT column names listed below — no guessing.        ║
+╚═══════════════════════════════════════════════════════════════╝
+
 ═══════════════════════════════════════════════════
 CORE O2C FLOW TABLES
 ═══════════════════════════════════════════════════
 
 TABLE: sales_order_headers
   PK: salesOrder
-  Columns: salesOrder, salesOrderType, salesOrganization, distributionChannel,
+  ALL COLUMNS: salesOrder, salesOrderType, salesOrganization, distributionChannel,
     organizationDivision, salesGroup, salesOffice, soldToParty, creationDate,
     createdByUser, lastChangeDateTime, totalNetAmount (REAL), overallDeliveryStatus,
     overallOrdReltdBillgStatus, overallSdDocReferenceStatus, transactionCurrency,
     pricingDate, requestedDeliveryDate, headerBillingBlockReason,
     deliveryBlockReason, incotermsClassification, incotermsLocation1,
     customerPaymentTerms, totalCreditCheckStatus
-  Notes: overallDeliveryStatus "C"=Complete, "A"=Not Yet Processed, "B"=Partial
+  Status codes: overallDeliveryStatus "C"=Complete, "A"=Not Yet Processed, "B"=Partial
+                overallOrdReltdBillgStatus "C"=Complete, "A"=Not Yet Processed, "B"=Partial
 
 TABLE: sales_order_items
   PK: (salesOrder, salesOrderItem)
-  Columns: salesOrder, salesOrderItem, salesOrderItemCategory, material,
+  ALL COLUMNS: salesOrder, salesOrderItem, salesOrderItemCategory, material,
     requestedQuantity (REAL), requestedQuantityUnit, transactionCurrency,
     netAmount (REAL), materialGroup, productionPlant, storageLocation,
     salesDocumentRjcnReason, itemBillingBlockReason
+  ⚠️ Product/material column is "material" (NOT "product")
   FK: salesOrder → sales_order_headers; material → products.product;
       productionPlant → plants.plant
 
 TABLE: sales_order_schedule_lines
   PK: (salesOrder, salesOrderItem, scheduleLine)
-  Columns: salesOrder, salesOrderItem, scheduleLine, confirmedDeliveryDate,
+  ALL COLUMNS: salesOrder, salesOrderItem, scheduleLine, confirmedDeliveryDate,
     orderQuantityUnit, confdOrderQtyByMatlAvailCheck (REAL)
-  FK: salesOrder+salesOrderItem → sales_order_items
 
 TABLE: outbound_delivery_headers
   PK: deliveryDocument
-  Columns: deliveryDocument, actualGoodsMovementDate, actualGoodsMovementTime,
+  ALL COLUMNS: deliveryDocument, actualGoodsMovementDate, actualGoodsMovementTime,
     creationDate, creationTime, deliveryBlockReason, hdrGeneralIncompletionStatus,
     headerBillingBlockReason, lastChangeDate, overallGoodsMovementStatus,
     overallPickingStatus, overallProofOfDeliveryStatus, shippingPoint
-  Notes: overallGoodsMovementStatus "C"=Complete, "A"=Not Yet Processed
+  ⚠️ This table does NOT have referenceSdDocument — that is on outbound_delivery_ITEMS
 
 TABLE: outbound_delivery_items
   PK: (deliveryDocument, deliveryDocumentItem)
-  Columns: deliveryDocument, deliveryDocumentItem, actualDeliveryQuantity (REAL),
+  ALL COLUMNS: deliveryDocument, deliveryDocumentItem, actualDeliveryQuantity (REAL),
     batch, deliveryQuantityUnit, itemBillingBlockReason, lastChangeDate,
     plant, referenceSdDocument, referenceSdDocumentItem, storageLocation
+  ⚠️ referenceSdDocument is HERE (links to sales_order_headers.salesOrder)
   FK: deliveryDocument → outbound_delivery_headers;
       referenceSdDocument → sales_order_headers.salesOrder;
       plant → plants.plant
 
 TABLE: billing_document_headers
   PK: billingDocument
-  Columns: billingDocument, billingDocumentType, creationDate, creationTime,
+  ALL COLUMNS: billingDocument, billingDocumentType, creationDate, creationTime,
     lastChangeDateTime, billingDocumentDate, billingDocumentIsCancelled (0/1),
     cancelledBillingDocument, totalNetAmount (REAL), transactionCurrency,
     companyCode, fiscalYear, accountingDocument, soldToParty
+  ⚠️ This table does NOT have referenceSdDocument — that is on billing_document_ITEMS
   FK: soldToParty → business_partners.businessPartner;
       accountingDocument+companyCode+fiscalYear → journal_entries
 
 TABLE: billing_document_items
   PK: (billingDocument, billingDocumentItem)
-  Columns: billingDocument, billingDocumentItem, material,
+  ALL COLUMNS: billingDocument, billingDocumentItem, material,
     billingQuantity (REAL), billingQuantityUnit, netAmount (REAL),
     transactionCurrency, referenceSdDocument, referenceSdDocumentItem
+  ⚠️ Product column is "material" (NOT "product")
+  ⚠️ referenceSdDocument is HERE (links to outbound_delivery_headers.deliveryDocument)
   FK: billingDocument → billing_document_headers;
       referenceSdDocument → outbound_delivery_headers.deliveryDocument;
       material → products.product
 
 TABLE: billing_document_cancellations
   PK: billingDocument
-  Same columns as billing_document_headers but for cancelled documents.
+  Same columns as billing_document_headers. For cancelled billing docs only.
 
-TABLE: journal_entries  (source: journal_entry_items_accounts_receivable)
+TABLE: journal_entries  (accounts receivable journal entry line items)
   PK: (companyCode, fiscalYear, accountingDocument, accountingDocumentItem)
-  Columns: companyCode, fiscalYear, accountingDocument, accountingDocumentItem,
+  ALL COLUMNS: companyCode, fiscalYear, accountingDocument, accountingDocumentItem,
     glAccount, referenceDocument, costCenter, profitCenter, transactionCurrency,
     amountInTransactionCurrency (REAL), companyCodeCurrency,
     amountInCompanyCodeCurrency (REAL), postingDate, documentDate,
@@ -607,12 +632,11 @@ TABLE: journal_entries  (source: journal_entry_items_accounts_receivable)
     customer, financialAccountType, clearingDate,
     clearingAccountingDocument, clearingDocFiscalYear
   FK: referenceDocument → billing_document_headers.billingDocument;
-      customer → business_partners.businessPartner;
-      clearingAccountingDocument = payment document number
+      customer → business_partners.businessPartner
 
-TABLE: payments  (source: payments_accounts_receivable)
+TABLE: payments  (accounts receivable payment line items)
   PK: (companyCode, fiscalYear, accountingDocument, accountingDocumentItem)
-  Columns: companyCode, fiscalYear, accountingDocument, accountingDocumentItem,
+  ALL COLUMNS: companyCode, fiscalYear, accountingDocument, accountingDocumentItem,
     clearingDate, clearingAccountingDocument, clearingDocFiscalYear,
     amountInTransactionCurrency (REAL), transactionCurrency,
     amountInCompanyCodeCurrency (REAL), companyCodeCurrency, customer,
@@ -627,87 +651,120 @@ MASTER DATA TABLES
 
 TABLE: business_partners  (customers)
   PK: businessPartner
-  Columns: businessPartner, customer, businessPartnerCategory,
+  ALL COLUMNS: businessPartner, customer, businessPartnerCategory,
     businessPartnerFullName, businessPartnerGrouping, businessPartnerName,
     correspondenceLanguage, createdByUser, creationDate, creationTime,
     firstName, lastName, formOfAddress, industry, lastChangeDate,
     organizationBpName1, organizationBpName2,
     businessPartnerIsBlocked (0/1), isMarkedForArchiving (0/1)
-  Notes: businessPartner often equals customer (same ID for the customer role)
 
 TABLE: business_partner_addresses
   PK: (businessPartner, addressId)
-  Columns: businessPartner, addressId, validityStartDate, validityEndDate,
+  ALL COLUMNS: businessPartner, addressId, validityStartDate, validityEndDate,
     addressUuid, addressTimeZone, cityName, country, postalCode, region,
     streetName, taxJurisdiction, transportZone
   FK: businessPartner → business_partners
 
 TABLE: customer_company_assignments
   PK: (customer, companyCode)
-  FK: customer → business_partners
+  ALL COLUMNS: customer, companyCode, reconciliationAccount, deletionIndicator,
+    customerAccountGroup, paymentTerms, paymentBlockingReason, paymentMethodsList
 
 TABLE: customer_sales_area_assignments
   PK: (customer, salesOrganization, distributionChannel, division)
-  FK: customer → business_partners
+  ALL COLUMNS: customer, salesOrganization, distributionChannel, division,
+    billingIsBlockedForCustomer, completeDeliveryIsDefined, creditControlArea,
+    currency, customerPaymentTerms, deliveryPriority, incotermsClassification,
+    incotermsLocation1, shippingCondition, exchangeRateType
 
 TABLE: products
   PK: product
-  Columns: product, productType, crossPlantStatus, crossPlantStatusValidityDate,
+  ALL COLUMNS: product, productType, crossPlantStatus, crossPlantStatusValidityDate,
     creationDate, createdByUser, lastChangeDate, lastChangeDateTime,
     isMarkedForDeletion (0/1), productOldId, grossWeight (REAL), weightUnit,
     netWeight (REAL), productGroup, baseUnit, division, industrySector
 
 TABLE: product_descriptions
   PK: (product, language)
-  Columns: product, language, productDescription
+  ALL COLUMNS: product, language, productDescription
   FK: product → products
+  Tip: Filter by language = 'EN' for English descriptions.
 
 TABLE: product_plants
   PK: (product, plant)
+  ALL COLUMNS: product, plant, countryOfOrigin, regionOfOrigin,
+    productionInvtryManagedLoc, availabilityCheckType, fiscalYearVariant,
+    profitCenter, mrpType
   FK: product → products; plant → plants
 
 TABLE: product_storage_locations
   PK: (product, plant, storageLocation)
-  FK: product → products; plant → plants
+  ALL COLUMNS: product, plant, storageLocation, physicalInventoryBlockInd,
+    dateOfLastPostedCntUnRstrcdStk
 
 TABLE: plants
   PK: plant
-  Columns: plant, plantName, valuationArea, plantCustomer, plantSupplier,
+  ALL COLUMNS: plant, plantName, valuationArea, plantCustomer, plantSupplier,
     factoryCalendar, defaultPurchasingOrganization, salesOrganization,
     addressId, plantCategory, distributionChannel, division, language,
     isMarkedForArchiving (0/1)
 
 ═══════════════════════════════════════════════════
-PRE-BUILT VIEWS (use these for common queries)
+PRE-BUILT VIEWS (prefer these for common queries)
 ═══════════════════════════════════════════════════
 
-VIEW: v_o2c_flow
-  Full O2C flow: salesOrder → customer/customerName → deliveryDocument →
-  billingDocument → journalDocument → paymentDocument with dates and amounts.
+VIEW: v_o2c_flow  — USE THIS for end-to-end flow queries
+  Columns: salesOrder, customer, customerName, orderAmount, orderCurrency,
+    orderDate, overallDeliveryStatus, deliveryDocument, goodsMovementDate,
+    overallGoodsMovementStatus, billingDocument, billingDocumentDate,
+    billingAmount, billingDocumentIsCancelled, journalDocument, journalAmount,
+    journalPostingDate, paymentDocument, paymentDate
 
-VIEW: v_customer_summary
-  Per-customer aggregation: totalOrders, totalOrderValue, totalBillingDocs,
-  with address info (cityName, region, country).
+VIEW: v_customer_summary  — USE THIS for customer analytics
+  Columns: businessPartner, businessPartnerName, totalOrders, totalOrderValue,
+    totalBillingDocs, cityName, region, country
 
-VIEW: v_product_billing_summary
-  Per-product billing stats: billingDocCount, totalBilledQty, totalBilledAmount,
-  with product description.
+VIEW: v_product_billing_summary  — USE THIS for product analytics
+  Columns: product, productDescription, productGroup, billingDocCount,
+    totalBilledQty, totalBilledAmount, transactionCurrency
 
-VIEW: v_incomplete_flows
-  Identifies broken O2C flows per sales order with boolean flags:
-  hasDelivery, hasBilling, hasJournalEntry, hasPayment.
+VIEW: v_incomplete_flows  — USE THIS for broken/incomplete flow queries
+  Columns: salesOrder, customer, orderAmount, overallDeliveryStatus,
+    hasDelivery (0/1), hasBilling (0/1), hasJournalEntry (0/1), hasPayment (0/1)
 
 ═══════════════════════════════════════════════════
 KEY RELATIONSHIP CHAIN (Order-to-Cash Flow)
 ═══════════════════════════════════════════════════
 
-  Sales Order (sales_order_headers.salesOrder)
-      ↓ [sales_order_items link order to products via material]
-  Delivery (outbound_delivery_items.referenceSdDocument = salesOrder)
-      ↓ [outbound_delivery_items → outbound_delivery_headers via deliveryDocument]
-  Billing (billing_document_items.referenceSdDocument = deliveryDocument)
-      ↓ [billing_document_items → billing_document_headers via billingDocument]
-  Journal Entry (journal_entries.referenceDocument = billingDocument)
-      ↓ [journal_entries.clearingAccountingDocument = payment doc]
-  Payment (payments or clearing info in journal_entries)
+  sales_order_headers (salesOrder)
+      ↓ sales_order_items (salesOrder, material → products.product)
+  outbound_delivery_items (referenceSdDocument = salesOrder)
+      ↓ outbound_delivery_headers (deliveryDocument)
+  billing_document_items (referenceSdDocument = deliveryDocument, material → products.product)
+      ↓ billing_document_headers (billingDocument)
+  journal_entries (referenceDocument = billingDocument, companyCode, fiscalYear)
+      ↓ clearingAccountingDocument = payment document
+  payments (clearingAccountingDocument)
+
+═══════════════════════════════════════════════════
+CORRECT JOIN EXAMPLES
+═══════════════════════════════════════════════════
+
+-- Orders → Deliveries (MUST go through items table):
+FROM sales_order_headers soh
+JOIN outbound_delivery_items odi ON odi.referenceSdDocument = soh.salesOrder
+JOIN outbound_delivery_headers odh ON odh.deliveryDocument = odi.deliveryDocument
+
+-- Deliveries → Billing (MUST go through items table):
+FROM outbound_delivery_items odi
+JOIN billing_document_items bdi ON bdi.referenceSdDocument = odi.deliveryDocument
+JOIN billing_document_headers bdh ON bdh.billingDocument = bdi.billingDocument
+
+-- Products in billing: use billing_document_items.material (NOT .product)
+-- Products in orders: use sales_order_items.material (NOT .product)
+-- To get product name: JOIN products p ON p.product = bdi.material
+--                      JOIN product_descriptions pd ON pd.product = p.product AND pd.language = 'EN'
+
+-- Delivered but not billed (USE THE VIEW):
+SELECT * FROM v_incomplete_flows WHERE hasDelivery = 1 AND hasBilling = 0
 """

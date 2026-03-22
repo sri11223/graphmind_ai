@@ -34,3 +34,12 @@ export async function sendChatMessage(
     body: JSON.stringify({ message, history }),
   });
 }
+
+export interface Suggestion {
+  text: string;
+  category: string;
+}
+
+export async function getSuggestions(): Promise<Suggestion[]> {
+  return fetchJson<Suggestion[]>(`${BASE}/chat/suggestions`);
+}

@@ -1,5 +1,7 @@
 import { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
+import ForceGraph3D from "react-force-graph-3d";
+import * as THREE from "three";
 import { useTheme } from "./providers/ThemeProvider";
 import type { GraphData, GraphNode } from "../types";
 
@@ -8,9 +10,10 @@ interface Props {
   onNodeClick: (node: GraphNode) => void;
   highlightNodes: Set<string>;
   selectedNode: GraphNode | null;
+  mode3D: boolean;
 }
 
-export default function GraphCanvas({ data, onNodeClick, highlightNodes, selectedNode }: Props) {
+export default function GraphCanvas({ data, onNodeClick, highlightNodes, selectedNode, mode3D }: Props) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);
@@ -32,16 +35,27 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
   useEffect(() => {
     const timer = setTimeout(() => {
       fgRef.current?.zoomToFit(400, 60);
-    }, 1000);
+    }, 1200);
     return () => clearTimeout(timer);
-  }, [data]);
+  }, [data, mode3D]);
 
   const handleNodeClick = useCallback(
     (node: any) => {
       onNodeClick(node as GraphNode);
-      fgRef.current?.centerAt(node.x, node.y, 300);
+      if (mode3D) {
+        // Fly camera to the clicked node
+        const distance = 120;
+        const distRatio = 1 + distance / Math.hypot(node.x || 0, node.y || 0, node.z || 0);
+        fgRef.current?.cameraPosition(
+          { x: (node.x || 0) * distRatio, y: (node.y || 0) * distRatio, z: (node.z || 0) * distRatio },
+          { x: node.x, y: node.y, z: node.z },
+          800
+        );
+      } else {
+        fgRef.current?.centerAt(node.x, node.y, 300);
+      }
     },
-    [onNodeClick]
+    [onNodeClick, mode3D]
   );
 
   const isHighlighted = useCallback(
@@ -54,6 +68,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
   const labelColor = isDark ? "#e5e7eb" : "#1f2937";
   const dimLabelColor = isDark ? "#6b7280" : "#9ca3af";
 
+  // ── 2D node rendering ──
   const nodeCanvasObject = useCallback(
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const n = node as GraphNode;
@@ -62,7 +77,6 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
       const isHl = isHighlighted(n.id);
       const dimmed = highlightNodes.size > 0 && !isHl && !isSelected;
 
-      // Glow for highlighted / selected
       if (isSelected || isHl) {
         ctx.beginPath();
         ctx.arc(node.x!, node.y!, r + 3, 0, 2 * Math.PI);
@@ -70,7 +84,6 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
         ctx.fill();
       }
 
-      // Node circle
       ctx.beginPath();
       ctx.arc(node.x!, node.y!, r, 0, 2 * Math.PI);
       ctx.fillStyle = dimmed ? `${n.color}44` : n.color;
@@ -82,7 +95,6 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
         ctx.stroke();
       }
 
-      // Label on zoom
       if (globalScale > 2.5 || isSelected || isHl) {
         const label = n.label || n.id;
         const fontSize = Math.max(8, 12 / globalScale);
@@ -96,6 +108,73 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
     [selectedNode, highlightNodes, isHighlighted, labelColor, dimLabelColor]
   );
 
+  // ── 3D node rendering ──
+  const nodeThreeObject = useCallback(
+    (node: any) => {
+      const n = node as GraphNode;
+      const r = Math.max(1.5, Math.sqrt(n.val || 1) * 1.2);
+      const isSelected = selectedNode?.id === n.id;
+      const isHl = isHighlighted(n.id);
+      const dimmed = highlightNodes.size > 0 && !isHl && !isSelected;
+
+      const group = new THREE.Group();
+
+      // Main sphere
+      const geo = new THREE.SphereGeometry(r, 16, 12);
+      const mat = new THREE.MeshPhongMaterial({
+        color: new THREE.Color(n.color),
+        transparent: dimmed,
+        opacity: dimmed ? 0.2 : 1,
+        shininess: 80,
+      });
+      const sphere = new THREE.Mesh(geo, mat);
+      group.add(sphere);
+
+      // Glow ring for selected / highlighted
+      if (isSelected || isHl) {
+        const ringGeo = new THREE.RingGeometry(r + 1, r + 2, 32);
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: isSelected ? 0x3b82f6 : 0xec4899,
+          transparent: true,
+          opacity: 0.5,
+          side: THREE.DoubleSide,
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        group.add(ring);
+      }
+
+      // Label sprite
+      if (isSelected || isHl || !dimmed) {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d")!;
+        const label = n.label || n.id;
+        canvas.width = 256;
+        canvas.height = 64;
+        ctx.clearRect(0, 0, 256, 64);
+        ctx.font = "bold 24px Inter, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillStyle = isDark ? "#e5e7eb" : "#1f2937";
+        ctx.fillText(label.slice(0, 24), 128, 40);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.minFilter = THREE.LinearFilter;
+        const spriteMat = new THREE.SpriteMaterial({
+          map: texture,
+          transparent: true,
+          opacity: dimmed ? 0.3 : 0.9,
+          depthWrite: false,
+        });
+        const sprite = new THREE.Sprite(spriteMat);
+        sprite.scale.set(20, 5, 1);
+        sprite.position.set(0, r + 4, 0);
+        group.add(sprite);
+      }
+
+      return group;
+    },
+    [selectedNode, highlightNodes, isHighlighted, isDark]
+  );
+
   const linkColor = useCallback(
     (link: any) => {
       const base = isDark ? "rgba(59,130,246," : "rgba(147,197,253,";
@@ -103,10 +182,20 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
       const srcId = typeof link.source === "object" ? link.source.id : link.source;
       const tgtId = typeof link.target === "object" ? link.target.id : link.target;
       if (highlightNodes.has(srcId) || highlightNodes.has(tgtId))
-        return "rgba(59,130,246,0.6)";
+        return "rgba(59,130,246,0.7)";
       return `${base}${isDark ? "0.05)" : "0.08)"}`;
     },
     [highlightNodes, isDark]
+  );
+
+  const linkParticles = useCallback(
+    (link: any) => {
+      if (highlightNodes.size === 0) return 0;
+      const srcId = typeof link.source === "object" ? link.source.id : link.source;
+      const tgtId = typeof link.target === "object" ? link.target.id : link.target;
+      return highlightNodes.has(srcId) || highlightNodes.has(tgtId) ? 3 : 0;
+    },
+    [highlightNodes]
   );
 
   // Memoize data to prevent re-rendering loops
@@ -114,29 +203,58 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
 
   return (
     <div ref={containerRef} className="w-full h-full">
-      <ForceGraph2D
-        ref={fgRef}
-        graphData={graphData}
-        width={dimensions.width}
-        height={dimensions.height}
-        nodeCanvasObject={nodeCanvasObject}
-        nodePointerAreaPaint={(node: any, color, ctx) => {
-          const r = Math.max(4, Math.sqrt((node as GraphNode).val || 1) * 2);
-          ctx.beginPath();
-          ctx.arc(node.x!, node.y!, r, 0, 2 * Math.PI);
-          ctx.fillStyle = color;
-          ctx.fill();
-        }}
-        onNodeClick={handleNodeClick}
-        linkColor={linkColor}
-        linkWidth={0.5}
-        linkDirectionalParticles={0}
-        enableNodeDrag={true}
-        cooldownTicks={200}
-        d3AlphaDecay={0.03}
-        d3VelocityDecay={0.4}
-        backgroundColor={bgColor}
-      />
+      {mode3D ? (
+        <ForceGraph3D
+          ref={fgRef}
+          graphData={graphData}
+          width={dimensions.width}
+          height={dimensions.height}
+          nodeThreeObject={nodeThreeObject}
+          onNodeClick={handleNodeClick}
+          linkColor={linkColor}
+          linkOpacity={0.6}
+          linkWidth={0.4}
+          linkDirectionalParticles={linkParticles}
+          linkDirectionalParticleSpeed={0.006}
+          linkDirectionalParticleWidth={1.5}
+          linkDirectionalParticleColor={() => "#3b82f6"}
+          enableNodeDrag={true}
+          enableNavigationControls={true}
+          showNavInfo={false}
+          backgroundColor={bgColor}
+          cooldownTicks={200}
+          d3AlphaDecay={0.03}
+          d3VelocityDecay={0.35}
+          onEngineStop={() => fgRef.current?.zoomToFit(400, 80)}
+        />
+      ) : (
+        <ForceGraph2D
+          ref={fgRef}
+          graphData={graphData}
+          width={dimensions.width}
+          height={dimensions.height}
+          nodeCanvasObject={nodeCanvasObject}
+          nodePointerAreaPaint={(node: any, color, ctx) => {
+            const r = Math.max(4, Math.sqrt((node as GraphNode).val || 1) * 2);
+            ctx.beginPath();
+            ctx.arc(node.x!, node.y!, r, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
+            ctx.fill();
+          }}
+          onNodeClick={handleNodeClick}
+          linkColor={linkColor}
+          linkWidth={0.5}
+          linkDirectionalParticles={linkParticles}
+          linkDirectionalParticleSpeed={0.004}
+          linkDirectionalParticleWidth={2}
+          linkDirectionalParticleColor={() => "#3b82f6"}
+          enableNodeDrag={true}
+          cooldownTicks={200}
+          d3AlphaDecay={0.03}
+          d3VelocityDecay={0.4}
+          backgroundColor={bgColor}
+        />
+      )}
     </div>
   );
 }

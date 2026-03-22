@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Bot, User, ChevronDown, ChevronRight, Loader2, Wifi, WifiOff } from "lucide-react";
-import { sendChatMessage } from "../services/api";
+import { Send, Bot, User, ChevronDown, ChevronRight, Loader2, Wifi, WifiOff, Sparkles } from "lucide-react";
+import { sendChatMessage, getSuggestions, type Suggestion } from "../services/api";
 import { useWebSocket, type WsMessage } from "../hooks";
 import { useToast } from "./providers/ToastProvider";
 import type { ChatMessage } from "../types";
@@ -34,6 +34,13 @@ export default function ChatPanel({ onHighlightNodes }: Props) {
   const streamingSqlRef = useRef<string | null>(null);
   const [expandedSql, setExpandedSql] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(true);
+
+  // Load suggestions once
+  useEffect(() => {
+    getSuggestions().then(setSuggestions).catch(() => {});
+  }, []);
 
   const handleWsMessage = useCallback(
     (data: WsMessage) => {
@@ -105,6 +112,7 @@ export default function ChatPanel({ onHighlightNodes }: Props) {
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setLoading(true);
+    setShowSuggestions(false);
 
     const history = messages
       .filter((m) => m !== WELCOME)
@@ -152,7 +160,7 @@ export default function ChatPanel({ onHighlightNodes }: Props) {
       <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
         <div>
           <h2 className="text-sm font-bold text-gray-800 dark:text-gray-100">Chat with Graph</h2>
-          <p className="text-[11px] text-gray-400 dark:text-gray-500">Order to Cash · Powered by Grok</p>
+          <p className="text-[11px] text-gray-400 dark:text-gray-500">Order to Cash · Powered by Groq</p>
         </div>
         <span title={isConnected ? "Streaming connected" : "Using REST fallback"}>
           {isConnected ? (
@@ -174,6 +182,27 @@ export default function ChatPanel({ onHighlightNodes }: Props) {
             onToggleSql={(idx) => setExpandedSql(expandedSql === idx ? null : idx)}
           />
         ))}
+
+        {/* Suggestion chips */}
+        {showSuggestions && suggestions.length > 0 && !loading && (
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500 font-medium">
+              <Sparkles size={12} />
+              Try these queries
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {suggestions.slice(0, 6).map((s, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setInput(s.text); setShowSuggestions(false); }}
+                  className="text-xs px-2.5 py-1.5 rounded-lg bg-brand-50 dark:bg-brand-900/20 text-brand-600 dark:text-brand-400 border border-brand-200 dark:border-brand-800/40 hover:bg-brand-100 dark:hover:bg-brand-900/40 transition truncate max-w-full"
+                >
+                  {s.text}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Streaming bubble */}
         {loading && (streamingContent || streamingStatus) && (
