@@ -1,0 +1,161 @@
+"""GraphMind AI — LLM Engine
+
+Google Gemini integration for natural-language → SQL translation
+and result interpretation.
+"""
+
+import json
+import logging
+import re
+import google.generativeai as genai
+from .config import GEMINI_API_KEY, GEMINI_MODEL
+from .database import get_schema_description
+
+log = logging.getLogger(__name__)
+
+_SQL_SYSTEM = """You are **GraphMind AI**, a specialised analytics engine for SAP Order-to-Cash (O2C) data stored in a SQLite database.
+
+YOUR ONLY PURPOSE is to help users query and understand this O2C dataset.  You must REFUSE every request that is not about this dataset.
+
+{schema}
+
+═══════════════════════════════════════════════════
+INSTRUCTIONS
+═══════════════════════════════════════════════════
+
+1. For RELEVANT questions → generate a valid SQLite SELECT statement that answers the question.
+2. For OFF-TOPIC questions (general knowledge, creative writing, coding, anything not about this O2C data) → set is_relevant to false.
+3. Rules for SQL generation:
+   • Only SELECT or WITH … SELECT.  Never INSERT/UPDATE/DELETE/DROP.
+   • Use proper JOINs following the relationship chain documented above.
+   • Prefer the pre-built views (v_o2c_flow, v_customer_summary, v_product_billing_summary, v_incomplete_flows) when they match the question.
+   • Always LIMIT to 100 unless the user asks for more.
+   • Use readable column aliases.
+   • Handle NULLs with COALESCE where appropriate.
+   • For "trace flow" questions, join through the full chain: sales_order → delivery → billing → journal_entry → payment.
+   • For "broken / incomplete flow" questions, use the v_incomplete_flows view.
+4. Return ONLY valid JSON — no markdown fences, no extra text.
+
+RESPONSE FORMAT (strict JSON):
+If relevant:
+{{"is_relevant": true, "sql": "<SQL>", "explanation": "<one-sentence explanation>"}}
+
+If off-topic:
+{{"is_relevant": false, "refusal": "<polite refusal message about only handling O2C data>"}}
+"""
+
+_INTERPRET_SYSTEM = """You are **GraphMind AI**, presenting results from an SAP Order-to-Cash analytics database.
+
+Rules:
+• Base your answer ONLY on the provided query results — never invent data.
+• Use markdown formatting: tables for multi-row results, bold for key figures.
+• If results are empty, explain clearly what was searched and that no matches exist.
+• Keep answers concise but complete.
+• When referencing specific entities, mention their IDs (e.g. Sales Order 740506).
+• For monetary values include the currency.
+• Do NOT repeat the SQL query.
+"""
+
+
+class LLMEngine:
+    def __init__(self):
+        if not GEMINI_API_KEY:
+            log.warning("GEMINI_API_KEY not set — LLM features will be unavailable")
+            self.model = None
+            return
+        genai.configure(api_key=GEMINI_API_KEY)
+        self.model = genai.GenerativeModel(
+            GEMINI_MODEL,
+            generation_config=genai.GenerationConfig(
+                temperature=0.1,
+                response_mime_type="application/json",
+            ),
+        )
+        self.interpret_model = genai.GenerativeModel(
+            GEMINI_MODEL,
+            generation_config=genai.GenerationConfig(temperature=0.3),
+        )
+        self._schema = get_schema_description()
+
+    # ------------------------------------------------------------------
+
+    def generate_sql(
+        self, question: str, history: list[dict] | None = None
+    ) -> dict:
+        """Translate a natural-language question into SQL.
+
+        Returns dict with keys: is_relevant, sql, explanation  OR  is_relevant, refusal
+        """
+        if self.model is None:
+            return {"is_relevant": False, "refusal": "LLM not configured. Set GEMINI_API_KEY."}
+
+        system = _SQL_SYSTEM.format(schema=self._schema)
+        messages = [{"role": "user", "parts": [system]}]
+        messages.append({"role": "model", "parts": ["Understood. I will generate SQL for O2C questions and refuse off-topic ones. Send me a question."]})
+
+        # Inject conversation history for context
+        if history:
+            for msg in history[-6:]:  # keep last 3 exchanges
+                role = "user" if msg["role"] == "user" else "model"
+                messages.append({"role": role, "parts": [msg["content"]]})
+
+        messages.append({"role": "user", "parts": [question]})
+
+        try:
+            response = self.model.generate_content(messages)
+            text = response.text.strip()
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Try to extract JSON from a markdown-fenced response
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                return json.loads(match.group())
+            return {"is_relevant": False, "refusal": "Failed to parse LLM response."}
+        except Exception as exc:
+            log.exception("LLM SQL generation failed")
+            return {"is_relevant": False, "refusal": f"LLM error: {exc}"}
+
+    # ------------------------------------------------------------------
+
+    def interpret_results(
+        self, question: str, sql: str, results: list[dict]
+    ) -> str:
+        """Turn raw SQL results into a natural-language answer."""
+        if self.interpret_model is None:
+            return self._fallback_format(results)
+
+        # Truncate large result sets for the LLM context
+        display_results = results[:50]
+        prompt = (
+            f"{_INTERPRET_SYSTEM}\n\n"
+            f"**User question:** {question}\n\n"
+            f"**SQL query:** `{sql}`\n\n"
+            f"**Results ({len(results)} rows, showing first {len(display_results)}):**\n"
+            f"```json\n{json.dumps(display_results, indent=2, default=str)}\n```\n\n"
+            "Provide a clear, data-driven answer."
+        )
+        try:
+            response = self.interpret_model.generate_content(prompt)
+            return response.text.strip()
+        except Exception as exc:
+            log.exception("LLM interpretation failed")
+            return self._fallback_format(results)
+
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fallback_format(results: list[dict]) -> str:
+        if not results:
+            return "The query returned no results."
+        if len(results) == 1 and len(results[0]) == 1:
+            val = list(results[0].values())[0]
+            return str(val)
+        # Simple markdown table
+        headers = list(results[0].keys())
+        lines = ["| " + " | ".join(headers) + " |"]
+        lines.append("| " + " | ".join("---" for _ in headers) + " |")
+        for row in results[:30]:
+            lines.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
+        if len(results) > 30:
+            lines.append(f"\n*…and {len(results) - 30} more rows.*")
+        return "\n".join(lines)
