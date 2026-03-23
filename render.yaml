@@ -1,9 +1,11 @@
-# Render.com deployment
+# Render.com deployment — Backend API only
+# Frontend is deployed separately on Vercel
 services:
   - type: web
-    name: graphmind-ai
+    name: graphmind-ai-api
     runtime: docker
     dockerfilePath: ./Dockerfile
+    plan: free
     envVars:
       - key: GROQ_API_KEY
         sync: false

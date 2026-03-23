@@ -1,12 +1,4 @@
-# ── Stage 1: Build frontend ──────────────────────────────────────
-FROM node:18-alpine AS frontend-build
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
-COPY frontend/ .
-RUN npm run build
-
-# ── Stage 2: Python backend + static frontend ───────────────────
+# ── Backend (Render.com) ─────────────────────────────────────────
 FROM python:3.11-slim
 WORKDIR /app
 
@@ -19,9 +11,6 @@ COPY backend/ ./backend/
 
 # Copy dataset
 COPY sap-o2c-data/ ./sap-o2c-data/
-
-# Copy built frontend
-COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 # Expose port
 EXPOSE 8000

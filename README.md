@@ -2,77 +2,172 @@
 
 **Graph-based SAP Order-to-Cash (O2C) analytics with LLM-powered natural language queries.**
 
-GraphMind AI ingests SAP O2C transactional data, builds an in-memory knowledge graph, visualises entity relationships in an interactive force-directed layout, and lets users explore the data through a conversational interface backed by Google Gemini.
+GraphMind AI ingests SAP O2C transactional data, builds an in-memory knowledge graph, visualises entity relationships in an interactive 2D/3D force-directed layout, and lets users explore the data through a conversational interface backed by Groq LLM (free).
+
+---
+
+## Live Demo
+
+| Service | URL |
+|---------|-----|
+| **Frontend** (Vercel) | `https://graphmind-ai.vercel.app` |
+| **Backend API** (Render) | `https://graphmind-ai-api.onrender.com` |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Frontend (React)                         │
-│  ┌──────────────────────┐  ┌──────────────────────────────────┐ │
-│  │  Force-Graph Canvas  │  │  Chat Panel + Node Inspector     │ │
-│  │  (react-force-graph)  │  │  (React-Markdown, Lucide icons) │ │
-│  └──────────────────────┘  └──────────────────────────────────┘ │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │ REST API (JSON)
-┌──────────────────────────────▼──────────────────────────────────┐
-│                       Backend (FastAPI)                          │
-│  ┌────────────┐ ┌──────────────┐ ┌───────────────────────────┐  │
-│  │  Graph API  │ │  Chat API    │ │  Query Engine             │  │
-│  │  /api/graph │ │  /api/chat   │ │  NL → SQL → Execute →    │  │
-│  └─────┬──────┘ └──────┬───────┘ │  Interpret → Respond      │  │
-│        │               │         └────────┬──────────────────┘  │
-│        │               │                  │                     │
-│  ┌─────▼──────┐ ┌──────▼────────┐ ┌──────▼───────────────────┐ │
-│  │  NetworkX   │ │  Guardrails   │ │  Google Gemini (LLM)     │ │
-│  │  DiGraph    │ │  SQL + Topic  │ │  NL-to-SQL + Interpret   │ │
-│  └─────┬──────┘ └───────────────┘ └──────────────────────────┘  │
-│        │                                                        │
-│  ┌─────▼──────────────────────────────────────────────────────┐ │
-│  │  SQLite  (19 tables + 4 analytical views + indexes)        │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                    Frontend (Vercel)                              │
+│  React 18 + TypeScript + Tailwind CSS                            │
+│  ┌──────────────────────┐  ┌───────────────────────────────────┐ │
+│  │  3D/2D Force Graph   │  │  Chat Panel + Node Inspector      │ │
+│  │  (react-force-graph)  │  │  WebSocket streaming + Markdown  │ │
+│  └──────────────────────┘  └───────────────────────────────────┘ │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │ REST + WebSocket
+┌──────────────────────────────▼───────────────────────────────────┐
+│                    Backend API (Render)                           │
+│  FastAPI + Python 3.11                                           │
+│  ┌────────────┐ ┌──────────────┐ ┌────────────────────────────┐  │
+│  │  Graph API  │ │  Chat API    │ │  Query Engine              │  │
+│  │  /api/graph │ │  /api/chat   │ │  NL → SQL → Execute →     │  │
+│  └─────┬──────┘ └──────┬───────┘ │  Interpret → Stream        │  │
+│        │               │         └────────┬───────────────────┘  │
+│  ┌─────▼──────┐ ┌──────▼────────┐ ┌──────▼──────────────────┐   │
+│  │  NetworkX   │ │  Guardrails   │ │  Groq LLM (free)        │  │
+│  │  DiGraph    │ │  SQL + Topic  │ │  llama-3.3-70b-versatile │  │
+│  └─────┬──────┘ └───────────────┘ └─────────────────────────┘   │
+│  ┌─────▼─────────────────────────────────────────────────────┐   │
+│  │  SQLite (19 tables + 4 views + indexes, WAL mode)         │   │
+│  └───────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Design Decisions
+## Features
 
-### Database: SQLite
+- **3D/2D Interactive Graph** — Orbit, zoom, rotate. Toggle between 3D (Three.js) and 2D (Canvas) modes. Animated link particles, glow effects, fly-to camera.
+- **Natural Language Queries** — Ask questions in plain English, get SQL + results + narrative answers.
+- **WebSocket Streaming** — Real-time streamed responses with progress indicators.
+- **Auto-Retry SQL** — If the LLM generates bad SQL, it auto-detects the error and self-corrects.
+- **Query Suggestions** — Pre-built example queries to get started quickly.
+- **Dark/Light Theme** — Toggle with persistent preference.
+- **Node Inspector** — Click any node to see properties + navigate to neighbors.
+- **Graph Search** — Debounced fuzzy search across all 669 nodes.
+- **Guardrails** — 3-layer safety: keyword filter, LLM refusal, SQL validator (SELECT only).
 
-- **Zero setup** — single file, no server process, embedded in the app.
-- Comprehensive **schema with typed columns** matching SAP field names (camelCase preserved for traceability).
-- **Pre-built analytical views** (`v_o2c_flow`, `v_customer_summary`, `v_product_billing_summary`, `v_incomplete_flows`) for common query patterns.
-- WAL mode for read-heavy analytics workloads.
+---
 
-### Graph: NetworkX (in-memory)
+## Deployment Guide
 
-- Eight entity types as nodes: **SalesOrder, Delivery, BillingDocument, JournalEntry, Payment, Customer, Product, Plant**.
-- Ten relationship types as directed edges following the O2C flow: `SOLD_TO`, `ORDERED_PRODUCT`, `FULFILLED_BY`, `SHIPPED_FROM`, `BILLED_AS`, `INVOICED_TO`, `POSTED_AS`, `CLEARED_BY`, `AVAILABLE_AT`.
-- Graph is built once on startup and cached for O(1) serialisation to the frontend.
-- Document-level granularity for Journal Entries and Payments (items grouped by accounting document).
+### Option A: Split Deployment (Recommended)
 
-### LLM: Google Gemini 2.0 Flash (free tier)
+**Frontend → Vercel** | **Backend → Render** | **Database → SQLite (in container)**
 
-Two-stage prompting strategy:
-1. **NL → SQL**: System prompt includes the *complete schema + relationship documentation + pre-built views*. Response constrained to JSON (`response_mime_type: application/json`). Temperature 0.1 for determinism.
-2. **Result → Answer**: Separate model call with temperature 0.3 for natural, readable narrative over the raw query results.
+#### Step 1: Deploy Backend on Render
 
-### Guardrails (3 layers)
+1. Push code to GitHub
+2. Go to [render.com](https://render.com) → **New → Web Service**
+3. Connect your GitHub repo (`sri11223/graphmind_ai`)
+4. Render auto-detects `render.yaml`. Settings:
+   - **Name**: `graphmind-ai-api`
+   - **Runtime**: Docker
+   - **Plan**: Free
+5. Add environment variable:
+   - `GROQ_API_KEY` = your key from [console.groq.com](https://console.groq.com) (free)
+6. Click **Deploy**
+7. Note your URL: `https://graphmind-ai-api.onrender.com`
 
-1. **Keyword filter** — instant rejection of clearly off-topic prompts (poems, jokes, general knowledge).
-2. **LLM-level refusal** — system prompt instructs the model to return `is_relevant: false` for anything outside O2C scope.
-3. **SQL validator** — regex-based allowlist (only `SELECT`/`WITH`), blocks all DDL/DML, prevents multi-statement injection.
+> On first startup, the server creates the SQLite DB and ingests all 21,000+ records from JSONL files (~10 seconds).
 
-### Frontend: React + Tailwind + react-force-graph-2d
+#### Step 2: Deploy Frontend on Vercel
 
-- **Canvas-rendered** force-directed layout handles thousands of nodes smoothly.
-- Nodes colour-coded by entity type; size proportional to connection degree.
-- Click-to-inspect node properties + neighbours; navigate between connected nodes.
-- Chat panel with conversation memory, markdown rendering, expandable SQL display.
-- Query results automatically highlight referenced nodes on the graph.
+1. Go to [vercel.com](https://vercel.com) → **New Project**
+2. Import the same GitHub repo
+3. Configure:
+   - **Framework**: Vite
+   - **Root Directory**: leave as `.` (vercel.json handles it)
+   - **Build Command**: `cd frontend && npm install && npm run build`
+   - **Output Directory**: `frontend/dist`
+4. Add environment variable:
+   - `VITE_API_URL` = `https://graphmind-ai-api.onrender.com` (your Render URL from Step 1)
+5. Click **Deploy**
+
+#### Step 3: Update CORS on Render
+
+Go to your Render service → **Environment** → update:
+- `CORS_ORIGINS` = `https://graphmind-ai.vercel.app` (your Vercel URL)
+
+Redeploy the backend.
+
+---
+
+### Option B: Docker (All-in-One)
+
+```bash
+docker build -t graphmind-ai .
+docker run -p 8000:8000 -e GROQ_API_KEY=your_key_here graphmind-ai
+```
+
+Open **http://localhost:8000**
+
+---
+
+### Option C: Local Development
+
+#### Prerequisites
+- Python 3.11+
+- Node.js 18+
+- Groq API key (free — [console.groq.com](https://console.groq.com))
+
+#### Backend
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # Mac/Linux
+pip install -r requirements.txt
+
+# Create .env in project root
+cp ../.env.example ../.env
+# Edit .env → set GROQ_API_KEY
+
+cd ..
+python -m uvicorn backend.app.main:app --reload --port 8000
+```
+
+#### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://localhost:5173** — Vite proxies `/api` to the backend automatically.
+
+---
+
+## Environment Variables
+
+### Backend (Render)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GROQ_API_KEY` | Yes | — | Groq API key ([free](https://console.groq.com)) |
+| `GROQ_MODEL` | No | `llama-3.3-70b-versatile` | LLM model |
+| `GROQ_BASE_URL` | No | `https://api.groq.com/openai/v1` | API endpoint |
+| `CORS_ORIGINS` | No | `*` | Comma-separated allowed origins |
+
+### Frontend (Vercel)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `VITE_API_URL` | Yes (production) | `` (same origin) | Backend URL, e.g. `https://graphmind-ai-api.onrender.com` |
 
 ---
 
@@ -100,72 +195,16 @@ Customer ← SOLD_TO ← Sales Order → ORDERED_PRODUCT → Product
 
 ---
 
-## Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- Node.js 18+
-- Google Gemini API key ([get one free](https://ai.google.dev))
-
-### 1. Backend
-
-```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-pip install -r requirements.txt
-
-# Create .env in project root
-cp ../.env.example ../.env
-# Edit ../.env → set GEMINI_API_KEY
-
-cd ..
-python -m uvicorn backend.app.main:app --reload --port 8000
-```
-
-On first run the server will:
-1. Create `graphmind.db` (SQLite)
-2. Ingest all JSONL files from `sap-o2c-data/`
-3. Build the O2C graph (~seconds)
-
-### 2. Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open **http://localhost:5173** — the Vite dev server proxies `/api` requests to the backend.
-
-### 3. Docker (Production)
-
-```bash
-docker build -t graphmind-ai .
-docker run -p 8000:8000 -e GEMINI_API_KEY=your_key_here graphmind-ai
-```
-
-Open **http://localhost:8000** — the backend serves the built React frontend.
-
-### 4. Deploy to Render.com
-
-1. Push to GitHub
-2. On [Render](https://render.com), click **New → Web Service → Connect your repo**
-3. Render auto-detects `render.yaml` — just add `GEMINI_API_KEY` as an environment variable
-4. Deploy — your live URL will be `https://graphmind-ai.onrender.com`
-
----
-
 ## Example Queries
 
 | Question | What it does |
 |----------|-------------|
-| *Which products are associated with the highest number of billing documents?* | Uses `v_product_billing_summary` view |
-| *Trace the full flow for billing document 91150187* | Joins SO → DEL → BD → JE → PAY |
-| *Find sales orders that are delivered but not billed* | Uses `v_incomplete_flows` (hasDelivery=1, hasBilling=0) |
-| *What is the total order value per customer?* | Aggregates `sales_order_headers` grouped by `soldToParty` |
-| *Show me cancelled billing documents and their original amounts* | Queries `billing_document_cancellations` |
+| *Show me the top 10 customers by order value* | Aggregates `sales_order_headers` by `soldToParty` |
+| *Trace the full O2C flow for sales order 740506* | Joins SO → DEL → BD → JE → PAY using `v_o2c_flow` |
+| *Find orders delivered but not yet billed* | Uses `v_incomplete_flows` view |
+| *Which products have the most billing documents?* | Uses `v_product_billing_summary` view |
+| *Show all cancelled billing documents* | Queries `billing_document_cancellations` |
+| *What is the total revenue by sales organization?* | Aggregates billing amounts by org |
 
 ---
 
@@ -176,33 +215,36 @@ Open **http://localhost:8000** — the backend serves the built React frontend.
 ├── backend/
 │   ├── app/
 │   │   ├── main.py            # FastAPI app + startup lifecycle
-│   │   ├── config.py          # Environment + paths
+│   │   ├── config.py          # Environment variables + paths
 │   │   ├── database.py        # SQLite schema, views, indexes
 │   │   ├── ingestion.py       # JSONL → SQLite pipeline
 │   │   ├── graph_engine.py    # NetworkX graph construction
-│   │   ├── llm_engine.py      # Gemini NL→SQL + interpretation
-│   │   ├── query_engine.py    # End-to-end query pipeline
+│   │   ├── llm_engine.py      # Groq NL→SQL + streaming interpretation
+│   │   ├── query_engine.py    # End-to-end query pipeline + auto-retry
 │   │   ├── guardrails.py      # SQL validation + topic filtering
 │   │   ├── schemas.py         # Pydantic request/response models
 │   │   └── routers/
 │   │       ├── graph.py       # /api/graph/* endpoints
-│   │       └── chat.py        # /api/chat endpoint
+│   │       └── chat.py        # /api/chat REST + WebSocket streaming
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx            # Root layout
+│   │   ├── App.tsx            # Root layout + 2D/3D toggle
 │   │   ├── components/
-│   │   │   ├── GraphCanvas.tsx    # Force-directed graph
-│   │   │   ├── ChatPanel.tsx      # Conversational interface
+│   │   │   ├── GraphCanvas.tsx    # 3D/2D force-directed graph
+│   │   │   ├── ChatPanel.tsx      # Chat + WebSocket + suggestions
 │   │   │   ├── NodeInspector.tsx  # Node detail overlay
-│   │   │   └── SearchBar.tsx      # Debounced graph node search
+│   │   │   ├── SearchBar.tsx      # Debounced graph search
+│   │   │   ├── ui/               # Reusable UI components
+│   │   │   └── providers/        # Theme + Toast providers
+│   │   ├── hooks/             # useWebSocket, useDebounce, etc.
 │   │   ├── services/api.ts   # API client
 │   │   └── types/index.ts    # TypeScript types
 │   ├── package.json
 │   └── vite.config.ts
-├── Dockerfile                 # Multi-stage Docker build
+├── Dockerfile                 # Backend Docker build for Render
 ├── render.yaml                # Render.com deployment config
-├── .dockerignore
+├── vercel.json                # Vercel frontend config
 ├── .env.example
 ├── .gitignore
 └── README.md
@@ -214,10 +256,13 @@ Open **http://localhost:8000** — the backend serves the built React frontend.
 
 | Layer | Technology | Rationale |
 |-------|-----------|-----------|
-| Backend | FastAPI (Python) | Async, fast, auto-docs, Pydantic validation |
-| Database | SQLite | Zero-config, embedded, excellent for read-heavy analytics |
-| Graph | NetworkX | Mature graph library, rich traversal algorithms |
-| LLM | Google Gemini 2.0 Flash | Free tier, fast, JSON output mode |
+| Backend | FastAPI (Python) | Async, fast, WebSocket support, auto-docs |
+| Database | SQLite (WAL) | Zero-config, embedded, excellent read perf |
+| Graph | NetworkX | Mature graph library, rich algorithms |
+| LLM | Groq (llama-3.3-70b-versatile) | Free, fast, OpenAI-compatible |
 | Frontend | React 18 + TypeScript | Type safety, component model |
-| Graph Viz | react-force-graph-2d | Canvas-rendered, handles 1000s of nodes |
-| Styling | Tailwind CSS | Rapid, consistent, utility-first |
+| 3D Graph | react-force-graph-3d + Three.js | WebGL 3D rendering, orbit controls |
+| 2D Graph | react-force-graph-2d | Canvas-rendered, lightweight fallback |
+| Styling | Tailwind CSS 3 | Utility-first, dark mode support |
+| Frontend Hosting | Vercel | Free, fast CDN, zero-config |
+| Backend Hosting | Render | Free, Docker support, auto-deploy |

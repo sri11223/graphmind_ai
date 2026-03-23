@@ -6,7 +6,9 @@ import { useWebSocket, type WsMessage } from "../hooks";
 import { useToast } from "./providers/ToastProvider";
 import type { ChatMessage } from "../types";
 
-const WS_URL = `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/chat/stream`;
+const _apiBase = import.meta.env.VITE_API_URL || "";
+const _wsBase = _apiBase ? _apiBase.replace(/^http/, "ws") : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
+const WS_URL = `${_wsBase}/api/chat/stream`;
 
 const WELCOME: ChatMessage = {
   role: "assistant",
