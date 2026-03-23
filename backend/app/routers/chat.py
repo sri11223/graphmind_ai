@@ -1,8 +1,12 @@
-"""Chat API endpoints — REST + WebSocket streaming."""
+"""Chat API endpoints — REST + WebSocket streaming + export."""
 
+import csv
+import io
+import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from ..schemas import ChatRequest, ChatResponse
+from fastapi.responses import StreamingResponse
+from ..schemas import ChatRequest, ChatResponse, ExportRequest
 from ..query_engine import QueryEngine
 from ..guardrails import validate_sql, is_off_topic, REFUSAL_MSG
 from ..database import execute_query
@@ -40,6 +44,38 @@ def suggestions():
         {"text": "Which plants handle the most deliveries?", "category": "Logistics"},
         {"text": "Compare order amounts vs billing amounts by customer", "category": "Analytics"},
     ]
+
+
+@router.post("/export")
+def export_data(req: ExportRequest):
+    """Export query result data as CSV or JSON download."""
+    data = req.data
+    fmt = req.format
+
+    if fmt == "json":
+        content = json.dumps(data, indent=2, default=str)
+        return StreamingResponse(
+            io.BytesIO(content.encode()),
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=graphmind_export.json"},
+        )
+
+    # CSV
+    if not data:
+        return StreamingResponse(
+            io.BytesIO(b""),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=graphmind_export.csv"},
+        )
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=data[0].keys())
+    writer.writeheader()
+    writer.writerows(data)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=graphmind_export.csv"},
+    )
 
 
 @router.websocket("/stream")

@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Bot, User, ChevronDown, ChevronRight, Loader2, Wifi, WifiOff, Sparkles } from "lucide-react";
-import { sendChatMessage, getSuggestions, type Suggestion } from "../services/api";
-import { useWebSocket, type WsMessage } from "../hooks";
+import { Send, Bot, User, ChevronDown, ChevronRight, Loader2, Wifi, WifiOff, Sparkles, Copy, Download, Trash2, Check } from "lucide-react";
+import { sendChatMessage, getSuggestions, exportData, type Suggestion } from "../services/api";
+import { useWebSocket, type WsMessage, useLocalStorage } from "../hooks";
 import { useToast } from "./providers/ToastProvider";
 import type { ChatMessage } from "../types";
 
@@ -28,7 +28,8 @@ interface Props {
 
 export default function ChatPanel({ onHighlightNodes }: Props) {
   const { toast } = useToast();
-  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME]);
+  const [savedHistory, setSavedHistory] = useLocalStorage<ChatMessage[]>("graphmind-chat-history", []);
+  const [messages, setMessages] = useState<ChatMessage[]>([WELCOME, ...savedHistory]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
@@ -37,7 +38,20 @@ export default function ChatPanel({ onHighlightNodes }: Props) {
   const [expandedSql, setExpandedSql] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(true);
+  const [showSuggestions, setShowSuggestions] = useState(savedHistory.length === 0);
+
+  // Persist chat history (exclude WELCOME)
+  useEffect(() => {
+    const toSave = messages.filter((m) => m !== WELCOME);
+    if (toSave.length > 0) setSavedHistory(toSave);
+  }, [messages, setSavedHistory]);
+
+  const clearHistory = useCallback(() => {
+    setMessages([WELCOME]);
+    setSavedHistory([]);
+    setShowSuggestions(true);
+    toast("success", "Chat history cleared");
+  }, [setSavedHistory, toast]);
 
   // Load suggestions once
   useEffect(() => {
@@ -164,13 +178,24 @@ export default function ChatPanel({ onHighlightNodes }: Props) {
           <h2 className="text-sm font-bold text-gray-800 dark:text-gray-100">Chat with Graph</h2>
           <p className="text-[11px] text-gray-400 dark:text-gray-500">Order to Cash · Powered by Groq</p>
         </div>
-        <span title={isConnected ? "Streaming connected" : "Using REST fallback"}>
-          {isConnected ? (
-            <Wifi size={14} className="text-emerald-500" />
-          ) : (
-            <WifiOff size={14} className="text-gray-400 cursor-pointer" onClick={connect} />
+        <div className="flex items-center gap-1.5">
+          {messages.length > 1 && (
+            <button
+              onClick={clearHistory}
+              title="Clear chat history"
+              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+            >
+              <Trash2 size={13} className="text-gray-400 hover:text-red-500 transition" />
+            </button>
           )}
-        </span>
+          <span title={isConnected ? "Streaming connected" : "Using REST fallback"}>
+            {isConnected ? (
+              <Wifi size={14} className="text-emerald-500" />
+            ) : (
+              <WifiOff size={14} className="text-gray-400 cursor-pointer" onClick={connect} />
+            )}
+          </span>
+        </div>
       </div>
 
       {/* Messages */}
@@ -284,6 +309,34 @@ function MessageBubble({
   expandedSql: number | null;
   onToggleSql: (i: number) => void;
 }) {
+  const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(msg.content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleExport = async (format: "csv" | "json") => {
+    if (!msg.data || msg.data.length === 0) return;
+    setExporting(true);
+    try {
+      const blob = await exportData(msg.data, format);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `graphmind_export.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      console.error("Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className={`flex gap-2 ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
       {msg.role === "assistant" && (
@@ -304,6 +357,40 @@ function MessageBubble({
           </div>
         ) : (
           <p>{msg.content}</p>
+        )}
+
+        {/* Action buttons for assistant messages */}
+        {msg.role === "assistant" && msg !== WELCOME && (
+          <div className="flex items-center gap-1 mt-1.5 pt-1.5 border-t border-gray-200/50 dark:border-gray-600/30">
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition px-1 py-0.5 rounded"
+              title="Copy response"
+            >
+              {copied ? <Check size={10} className="text-emerald-500" /> : <Copy size={10} />}
+              {copied ? "Copied" : "Copy"}
+            </button>
+            {msg.data && msg.data.length > 0 && (
+              <>
+                <button
+                  onClick={() => handleExport("csv")}
+                  disabled={exporting}
+                  className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition px-1 py-0.5 rounded"
+                  title="Export as CSV"
+                >
+                  <Download size={10} /> CSV
+                </button>
+                <button
+                  onClick={() => handleExport("json")}
+                  disabled={exporting}
+                  className="flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition px-1 py-0.5 rounded"
+                  title="Export as JSON"
+                >
+                  <Download size={10} /> JSON
+                </button>
+              </>
+            )}
+          </div>
         )}
 
         {/* Expandable SQL */}

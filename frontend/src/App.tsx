@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Sun, Moon, BarChart3, Box, Layers } from "lucide-react";
+import { Sun, Moon, BarChart3, Box, Layers, TrendingUp, Route, Filter } from "lucide-react";
 import GraphCanvas from "./components/GraphCanvas";
 import ChatPanel from "./components/ChatPanel";
 import NodeInspector from "./components/NodeInspector";
 import SearchBar from "./components/SearchBar";
+import AnalyticsDashboard from "./components/AnalyticsDashboard";
+import PathFinder from "./components/PathFinder";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { Toolbar, Button, Spinner, Badge } from "./components/ui";
 import { useTheme } from "./components/providers/ThemeProvider";
 import { getGraphData, getGraphStats } from "./services/api";
@@ -13,21 +16,68 @@ import { ENTITY_COLORS } from "./types";
 export default function App() {
   const { theme, toggleTheme } = useTheme();
   const [graphData, setGraphData] = useState<GraphData | null>(null);
+  const [filteredData, setFilteredData] = useState<GraphData | null>(null);
   const [stats, setStats] = useState<GraphStats | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
   const [mode3D, setMode3D] = useState(true);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [showPathFinder, setShowPathFinder] = useState(false);
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     Promise.all([getGraphData(), getGraphStats()])
       .then(([gd, gs]) => {
         setGraphData(gd);
+        setFilteredData(gd);
         setStats(gs);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+  }, []);
+
+  // Filter graph by hidden node types
+  useEffect(() => {
+    if (!graphData) return;
+    if (hiddenTypes.size === 0) {
+      setFilteredData(graphData);
+      return;
+    }
+    const visibleNodeIds = new Set(
+      graphData.nodes.filter((n) => !hiddenTypes.has(n.type)).map((n) => n.id)
+    );
+    setFilteredData({
+      nodes: graphData.nodes.filter((n) => visibleNodeIds.has(n.id)),
+      links: graphData.links.filter((l) => {
+        const src = typeof l.source === "string" ? l.source : l.source.id;
+        const tgt = typeof l.target === "string" ? l.target : l.target.id;
+        return visibleNodeIds.has(src) && visibleNodeIds.has(tgt);
+      }),
+    });
+  }, [graphData, hiddenTypes]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedNode(null);
+        setShowAnalytics(false);
+        setShowPathFinder(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const toggleTypeFilter = useCallback((type: string) => {
+    setHiddenTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
   }, []);
 
   const handleNodeClick = useCallback((node: GraphNode) => setSelectedNode(node), []);
@@ -47,6 +97,7 @@ export default function App() {
   }
 
   return (
+    <ErrorBoundary>
     <div className="h-full flex flex-col bg-gray-50 dark:bg-gray-950">
       <Toolbar
         left={
@@ -72,6 +123,12 @@ export default function App() {
                 </span>
               </>
             )}
+            <Button variant="ghost" size="sm" onClick={() => setShowAnalytics(!showAnalytics)} icon={<TrendingUp size={14} />}>
+              Analytics
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowPathFinder(!showPathFinder)} icon={<Route size={14} />}>
+              Path
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setMode3D(!mode3D)} icon={mode3D ? <Box size={14} /> : <Layers size={14} />}>
               {mode3D ? "3D" : "2D"}
             </Button>
@@ -89,9 +146,9 @@ export default function App() {
       <div className="flex flex-1 min-h-0">
         {/* Graph area */}
         <div className="flex-1 relative">
-          {graphData && (
+          {filteredData && (
             <GraphCanvas
-              data={graphData}
+              data={filteredData}
               onNodeClick={handleNodeClick}
               highlightNodes={highlightNodes}
               selectedNode={selectedNode}
@@ -107,15 +164,40 @@ export default function App() {
             }}
           />
 
-          {/* Legend overlay */}
+          {/* Legend overlay with filter */}
           {showLegend && (
             <div className="absolute bottom-3 left-3 bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-lg shadow-md border border-gray-200/50 dark:border-gray-700/50 px-3 py-2.5 z-10">
-              <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Entity Types</p>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Entity Types</p>
+                <Filter size={10} className="text-gray-400" />
+              </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                 {Object.entries(ENTITY_COLORS).map(([type, color]) => (
-                  <Badge key={type} color={color} size="sm">{type}</Badge>
+                  <button
+                    key={type}
+                    onClick={() => toggleTypeFilter(type)}
+                    className={`flex items-center gap-1.5 text-[11px] px-1 py-0.5 rounded transition ${
+                      hiddenTypes.has(type)
+                        ? "opacity-30 line-through"
+                        : "hover:bg-gray-100 dark:hover:bg-gray-700/50"
+                    }`}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                    <span className="text-gray-600 dark:text-gray-300">{type}</span>
+                    {stats?.nodesByType[type] != null && (
+                      <span className="text-[9px] text-gray-400">({stats.nodesByType[type]})</span>
+                    )}
+                  </button>
                 ))}
               </div>
+              {hiddenTypes.size > 0 && (
+                <button
+                  onClick={() => setHiddenTypes(new Set())}
+                  className="text-[10px] text-brand-500 hover:text-brand-600 mt-1.5 transition"
+                >
+                  Show all
+                </button>
+              )}
             </div>
           )}
 
@@ -130,11 +212,25 @@ export default function App() {
               }}
             />
           )}
+
+          {/* Path Finder overlay */}
+          {showPathFinder && (
+            <PathFinder
+              onClose={() => setShowPathFinder(false)}
+              onHighlightPath={handleHighlight}
+            />
+          )}
+
+          {/* Analytics Dashboard overlay */}
+          {showAnalytics && (
+            <AnalyticsDashboard onClose={() => setShowAnalytics(false)} />
+          )}
         </div>
 
         {/* Chat panel */}
         <ChatPanel onHighlightNodes={handleHighlight} />
       </div>
     </div>
+    </ErrorBoundary>
   );
 }

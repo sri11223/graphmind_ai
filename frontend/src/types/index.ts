@@ -29,6 +29,7 @@ export interface ChatMessage {
   sql?: string | null;
   data?: Record<string, unknown>[] | null;
   referencedNodes?: string[];
+  timestamp?: number;
 }
 
 export interface ChatApiResponse {
@@ -61,6 +62,31 @@ export interface GraphStats {
   totalEdges: number;
   nodesByType: Record<string, number>;
   edgesByType: Record<string, number>;
+}
+
+/* ── Analytics ── */
+
+export interface AnalyticsData {
+  funnel: {
+    orders: number;
+    delivered: number;
+    billed: number;
+    paid: number;
+  };
+  totalRevenue: number;
+  topCustomers: { name: string; orders: number; revenue: number }[];
+  topProducts: { name: string; orders: number }[];
+  statusDistribution: { status: string; count: number }[];
+  monthlyTrend: { month: string; revenue: number; invoices: number }[];
+}
+
+/* ── Path Finder ── */
+
+export interface PathResult {
+  path: { id: string; type: string; label: string; color: string }[];
+  edges: { source: string; target: string; type: string }[];
+  length: number;
+  error?: string;
 }
 
 /* ── Entity colour map (matches backend PALETTE) ── */

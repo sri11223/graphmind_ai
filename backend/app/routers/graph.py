@@ -34,3 +34,21 @@ def search_nodes(q: str = Query(..., min_length=1), limit: int = 20):
 @router.get("/stats")
 def get_graph_stats():
     return _engine.get_stats()
+
+
+@router.get("/analytics")
+def get_analytics():
+    """Dashboard KPI analytics for the O2C dataset."""
+    return _engine.get_analytics()
+
+
+@router.get("/path")
+def find_path(
+    source: str = Query(..., description="Source node ID"),
+    target: str = Query(..., description="Target node ID"),
+):
+    """Find shortest path between two graph nodes."""
+    result = _engine.find_path(source, target)
+    if result is None:
+        return {"error": "No path found between the given nodes"}
+    return result

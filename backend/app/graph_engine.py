@@ -373,3 +373,110 @@ class GraphEngine:
             "nodesByType": dict(type_counts),
             "edgesByType": dict(edge_type_counts),
         }
+
+    # ------------------------------------------------------------------
+    # Path finder — shortest path between two nodes
+    # ------------------------------------------------------------------
+
+    def find_path(self, source_id: str, target_id: str) -> dict | None:
+        if not self.graph.has_node(source_id) or not self.graph.has_node(target_id):
+            return None
+        try:
+            path = nx.shortest_path(self.graph.to_undirected(), source_id, target_id)
+        except nx.NetworkXNoPath:
+            return None
+        nodes = []
+        for nid in path:
+            attrs = self.graph.nodes[nid]
+            nodes.append({
+                "id": nid,
+                "type": attrs.get("type", ""),
+                "label": attrs.get("label", nid),
+                "color": attrs.get("color", "#999"),
+            })
+        edges = []
+        for i in range(len(path) - 1):
+            a, b = path[i], path[i + 1]
+            if self.graph.has_edge(a, b):
+                edges.append({"source": a, "target": b, "type": self.graph.edges[a, b].get("type", "")})
+            elif self.graph.has_edge(b, a):
+                edges.append({"source": b, "target": a, "type": self.graph.edges[b, a].get("type", "")})
+        return {"path": nodes, "edges": edges, "length": len(path) - 1}
+
+    # ------------------------------------------------------------------
+    # Analytics — KPI dashboard data
+    # ------------------------------------------------------------------
+
+    def get_analytics(self) -> dict:
+        from .database import get_connection
+        with get_connection() as conn:
+            # O2C flow completion
+            total_orders = conn.execute("SELECT COUNT(*) FROM sales_order_headers").fetchone()[0]
+            delivered = conn.execute(
+                "SELECT COUNT(DISTINCT soi.salesOrder) FROM sales_order_items soi "
+                "JOIN outbound_delivery_items odi ON odi.referenceSdDocument = soi.salesOrder"
+            ).fetchone()[0]
+            billed = conn.execute(
+                "SELECT COUNT(DISTINCT odi.deliveryDocument) FROM outbound_delivery_items odi "
+                "JOIN billing_document_items bdi ON bdi.referenceSdDocument = odi.deliveryDocument"
+            ).fetchone()[0]
+            paid = conn.execute(
+                "SELECT COUNT(DISTINCT accountingDocument) FROM journal_entries "
+                "WHERE clearingAccountingDocument IS NOT NULL AND clearingAccountingDocument != ''"
+            ).fetchone()[0]
+
+            # Revenue
+            total_revenue = conn.execute(
+                "SELECT COALESCE(SUM(totalNetAmount), 0) FROM billing_document_headers "
+                "WHERE billingDocumentIsCancelled = ''"
+            ).fetchone()[0]
+
+            # Top 5 customers
+            top_customers = [dict(r) for r in conn.execute(
+                "SELECT bp.businessPartnerName AS name, "
+                "COUNT(DISTINCT soh.salesOrder) AS orders, "
+                "COALESCE(SUM(soh.totalNetAmount), 0) AS revenue "
+                "FROM sales_order_headers soh "
+                "JOIN business_partners bp ON bp.businessPartner = soh.soldToParty "
+                "GROUP BY bp.businessPartner ORDER BY revenue DESC LIMIT 5"
+            )]
+
+            # Top 5 products
+            top_products = [dict(r) for r in conn.execute(
+                "SELECT COALESCE(pd.productDescription, p.product) AS name, "
+                "COUNT(DISTINCT soi.salesOrder) AS orders "
+                "FROM sales_order_items soi "
+                "JOIN products p ON p.product = soi.material "
+                "LEFT JOIN product_descriptions pd ON pd.product = p.product AND pd.language = 'EN' "
+                "GROUP BY soi.material ORDER BY orders DESC LIMIT 5"
+            )]
+
+            # Order status distribution
+            status_dist = [dict(r) for r in conn.execute(
+                "SELECT overallDeliveryStatus AS status, COUNT(*) AS count "
+                "FROM sales_order_headers GROUP BY overallDeliveryStatus"
+            )]
+
+            # Monthly revenue trend (by billing date)
+            monthly_trend = [dict(r) for r in conn.execute(
+                "SELECT SUBSTR(billingDocumentDate, 1, 7) AS month, "
+                "COALESCE(SUM(totalNetAmount), 0) AS revenue, "
+                "COUNT(*) AS invoices "
+                "FROM billing_document_headers "
+                "WHERE billingDocumentIsCancelled = '' AND billingDocumentDate != '' "
+                "GROUP BY month ORDER BY month"
+            )]
+
+        return {
+            "funnel": {
+                "orders": total_orders,
+                "delivered": delivered,
+                "billed": billed,
+                "paid": paid,
+            },
+            "totalRevenue": float(total_revenue),
+            "topCustomers": top_customers,
+            "topProducts": top_products,
+            "statusDistribution": status_dist,
+            "monthlyTrend": monthly_trend,
+        }
