@@ -3,23 +3,55 @@
 End-to-end pipeline: user question → guardrails → NL-to-SQL → execute → interpret.
 """
 
+import hashlib
 import logging
 import re
+from collections import OrderedDict
+
 from .llm_engine import LLMEngine
 from .guardrails import validate_sql, is_off_topic, REFUSAL_MSG
 from .database import execute_query
 
 log = logging.getLogger(__name__)
 
+_CACHE_MAX = 128
+
 
 class QueryEngine:
     def __init__(self, llm: LLMEngine):
         self.llm = llm
+        self._cache: OrderedDict[str, dict] = OrderedDict()
+
+    # ------------------------------------------------------------------
+    # Query result cache
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _cache_key(question: str) -> str:
+        return hashlib.sha256(question.strip().lower().encode()).hexdigest()
+
+    def _get_cached(self, key: str) -> dict | None:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            log.info("Cache hit for query")
+            return self._cache[key]
+        return None
+
+    def _put_cache(self, key: str, result: dict) -> None:
+        self._cache[key] = result
+        if len(self._cache) > _CACHE_MAX:
+            self._cache.popitem(last=False)
 
     def process(
         self, question: str, history: list[dict] | None = None
     ) -> dict:
         """Full query pipeline. Returns dict with answer, sql, data, referenced_nodes."""
+
+        # --- Cache check ---
+        cache_key = self._cache_key(question)
+        cached = self._get_cached(cache_key)
+        if cached is not None:
+            return cached
 
         # --- Guardrail 1: Quick off-topic check ---
         if is_off_topic(question):
@@ -91,12 +123,14 @@ class QueryEngine:
         # --- Bonus: extract node IDs referenced in the answer ---
         referenced = self._extract_node_refs(results)
 
-        return {
+        result = {
             "answer": answer,
             "sql": sql,
             "data": results[:100],
             "referencedNodes": referenced,
         }
+        self._put_cache(cache_key, result)
+        return result
 
     # ------------------------------------------------------------------
 

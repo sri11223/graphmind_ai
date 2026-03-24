@@ -84,7 +84,8 @@ class LLMEngine:
         messages: list[dict] = [{"role": "system", "content": system}]
 
         if history:
-            for msg in history[-6:]:
+            # Use up to 10 recent messages for richer context
+            for msg in history[-10:]:
                 messages.append({"role": msg["role"], "content": msg["content"]})
 
         messages.append({"role": "user", "content": question})

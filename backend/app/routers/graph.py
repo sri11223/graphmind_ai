@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException, Query, status
 from ..graph_engine import GraphEngine
 from ..schemas import (
     AnalyticsResponse,
+    CentralityResponse,
+    CommunitiesResponse,
     ErrorResponse,
     GraphDataResponse,
     NodeDetailResponse,
@@ -53,11 +55,19 @@ def get_node_detail(node_id: str):
 @router.get(
     "/search",
     response_model=list[SearchResult],
-    summary="Search nodes",
-    description="Fuzzy search across all node IDs and labels. Returns up to `limit` matches.",
+    summary="Hybrid search nodes",
+    description="Hybrid search combining substring matching + TF-IDF semantic similarity. Returns up to `limit` matches ranked by combined score.",
 )
-def search_nodes(q: str = Query(..., min_length=1, description="Search query"), limit: int = 20):
-    return _engine.search_nodes(q, limit=limit)
+def search_nodes(
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = 20,
+    mode: str = Query("hybrid", description="Search mode: substring, semantic, or hybrid"),
+):
+    if mode == "semantic":
+        return _engine.semantic_search(q, limit=limit)
+    elif mode == "substring":
+        return _engine.search_nodes(q, limit=limit)
+    return _engine.hybrid_search(q, limit=limit)
 
 
 @router.get(
@@ -95,3 +105,23 @@ def find_path(
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No path found between the given nodes")
     return result
+
+
+@router.get(
+    "/communities",
+    response_model=CommunitiesResponse,
+    summary="Community detection",
+    description="Detect graph communities using the Louvain algorithm. Returns cluster assignments for all nodes and per-cluster statistics.",
+)
+def get_communities():
+    return _engine.get_communities()
+
+
+@router.get(
+    "/centrality",
+    response_model=CentralityResponse,
+    summary="Centrality metrics",
+    description="Top-20 nodes ranked by degree centrality, betweenness centrality, and PageRank.",
+)
+def get_centrality():
+    return _engine.get_centrality()

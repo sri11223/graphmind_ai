@@ -10,8 +10,8 @@ GraphMind AI ingests SAP O2C transactional data, builds an in-memory knowledge g
 
 | Service | URL |
 |---------|-----|
-| **Frontend** (Vercel) | `https://graphmind-ai.vercel.app` |
-| **Backend API** (Render) | `https://graphmind-ai-api.onrender.com` |
+| **Frontend** (Vercel) | `https://graphmind-ai-sigma.vercel.app/` |
+| **Backend API** (Render) | `https://graphmind-ai.onrender.com` |
 
 ---
 

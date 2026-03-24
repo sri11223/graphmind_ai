@@ -11,9 +11,15 @@ interface Props {
   highlightNodes: Set<string>;
   selectedNode: GraphNode | null;
   mode3D: boolean;
+  clusterAssignments?: Record<string, number> | null;
 }
 
-export default function GraphCanvas({ data, onNodeClick, highlightNodes, selectedNode, mode3D }: Props) {
+const CLUSTER_PALETTE = [
+  "#3B82F6", "#10B981", "#F59E0B", "#EC4899", "#8B5CF6",
+  "#06B6D4", "#EF4444", "#84CC16", "#F97316", "#6366F1",
+];
+
+export default function GraphCanvas({ data, onNodeClick, highlightNodes, selectedNode, mode3D, clusterAssignments }: Props) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);
@@ -68,6 +74,17 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
   const labelColor = isDark ? "#e5e7eb" : "#1f2937";
   const dimLabelColor = isDark ? "#6b7280" : "#9ca3af";
 
+  // Helper: get node color (cluster mode or default)
+  const getNodeColor = useCallback(
+    (nodeId: string, defaultColor: string) => {
+      if (clusterAssignments && nodeId in clusterAssignments) {
+        return CLUSTER_PALETTE[clusterAssignments[nodeId] % CLUSTER_PALETTE.length];
+      }
+      return defaultColor;
+    },
+    [clusterAssignments]
+  );
+
   // ── 2D node rendering ──
   const nodeCanvasObject = useCallback(
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -76,6 +93,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
       const isSelected = selectedNode?.id === n.id;
       const isHl = isHighlighted(n.id);
       const dimmed = highlightNodes.size > 0 && !isHl && !isSelected;
+      const nodeColor = getNodeColor(n.id, n.color);
 
       if (isSelected || isHl) {
         ctx.beginPath();
@@ -86,7 +104,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
 
       ctx.beginPath();
       ctx.arc(node.x!, node.y!, r, 0, 2 * Math.PI);
-      ctx.fillStyle = dimmed ? `${n.color}44` : n.color;
+      ctx.fillStyle = dimmed ? `${nodeColor}44` : nodeColor;
       ctx.fill();
 
       if (isSelected) {
@@ -105,7 +123,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
         ctx.fillText(label, node.x!, node.y! + r + 2);
       }
     },
-    [selectedNode, highlightNodes, isHighlighted, labelColor, dimLabelColor]
+    [selectedNode, highlightNodes, isHighlighted, labelColor, dimLabelColor, getNodeColor]
   );
 
   // ── 3D node rendering ──
@@ -116,13 +134,14 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
       const isSelected = selectedNode?.id === n.id;
       const isHl = isHighlighted(n.id);
       const dimmed = highlightNodes.size > 0 && !isHl && !isSelected;
+      const nodeColor = getNodeColor(n.id, n.color);
 
       const group = new THREE.Group();
 
       // Main sphere
       const geo = new THREE.SphereGeometry(r, 16, 12);
       const mat = new THREE.MeshPhongMaterial({
-        color: new THREE.Color(n.color),
+        color: new THREE.Color(nodeColor),
         transparent: dimmed,
         opacity: dimmed ? 0.2 : 1,
         shininess: 80,
@@ -172,7 +191,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
 
       return group;
     },
-    [selectedNode, highlightNodes, isHighlighted, isDark]
+    [selectedNode, highlightNodes, isHighlighted, isDark, getNodeColor]
   );
 
   const linkColor = useCallback(

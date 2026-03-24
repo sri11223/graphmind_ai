@@ -5,8 +5,13 @@ serialises it for the frontend (react-force-graph-2d compatible JSON).
 """
 
 import logging
-from collections import defaultdict
+import math
+import re
+from collections import Counter, defaultdict
+
 import networkx as nx
+from networkx.algorithms.community import louvain_communities
+
 from .database import get_connection
 
 log = logging.getLogger(__name__)
@@ -28,6 +33,9 @@ class GraphEngine:
     def __init__(self):
         self.graph = nx.DiGraph()
         self._cache: dict | None = None
+        self._tfidf_index: dict | None = None
+        self._communities_cache: dict | None = None
+        self._centrality_cache: dict | None = None
 
     # ------------------------------------------------------------------
     # Build
@@ -480,3 +488,186 @@ class GraphEngine:
             "statusDistribution": status_dist,
             "monthlyTrend": monthly_trend,
         }
+
+    # ------------------------------------------------------------------
+    # TF-IDF Semantic Search
+    # ------------------------------------------------------------------
+
+    def _build_search_index(self):
+        """Build TF-IDF inverted index over all node properties."""
+        docs: dict[str, str] = {}
+        for nid, attrs in self.graph.nodes(data=True):
+            parts = [str(v) for k, v in attrs.items() if v and k not in ("color", "x", "y")]
+            docs[nid] = " ".join(parts).lower()
+
+        n_docs = len(docs)
+        if n_docs == 0:
+            self._tfidf_index = {"idf": {}, "vectors": {}, "docs": {}}
+            return
+
+        # Tokenize
+        tokenized: dict[str, Counter] = {}
+        doc_freq: Counter = Counter()
+        for nid, text in docs.items():
+            tokens = re.findall(r"\w+", text)
+            tokenized[nid] = Counter(tokens)
+            doc_freq.update(set(tokens))
+
+        # IDF
+        idf = {t: math.log((n_docs + 1) / (df + 1)) + 1 for t, df in doc_freq.items()}
+
+        # TF-IDF vectors (normalised)
+        vectors: dict[str, dict[str, float]] = {}
+        for nid, tf in tokenized.items():
+            vec = {t: c * idf.get(t, 1.0) for t, c in tf.items()}
+            norm = math.sqrt(sum(v * v for v in vec.values())) or 1.0
+            vectors[nid] = {t: v / norm for t, v in vec.items()}
+
+        self._tfidf_index = {"idf": idf, "vectors": vectors, "docs": docs}
+        log.info("TF-IDF search index built: %d documents, %d terms", n_docs, len(idf))
+
+    def semantic_search(self, query: str, limit: int = 20) -> list[dict]:
+        """Search nodes using TF-IDF cosine similarity."""
+        if self._tfidf_index is None:
+            self._build_search_index()
+
+        idf = self._tfidf_index["idf"]
+        vectors = self._tfidf_index["vectors"]
+
+        # Build query vector
+        q_tokens = Counter(re.findall(r"\w+", query.lower()))
+        q_vec = {t: c * idf.get(t, 1.0) for t, c in q_tokens.items()}
+        q_norm = math.sqrt(sum(v * v for v in q_vec.values())) or 1.0
+        q_vec = {t: v / q_norm for t, v in q_vec.items()}
+
+        # Cosine similarity against all docs
+        scores: list[tuple[str, float]] = []
+        for nid, doc_vec in vectors.items():
+            sim = sum(q_vec.get(t, 0) * doc_vec.get(t, 0) for t in q_vec)
+            if sim > 0.01:
+                scores.append((nid, sim))
+
+        scores.sort(key=lambda x: x[1], reverse=True)
+
+        results = []
+        for nid, score in scores[:limit]:
+            attrs = self.graph.nodes[nid]
+            results.append({
+                "id": nid,
+                "type": attrs.get("type", ""),
+                "label": attrs.get("label", nid),
+                "color": attrs.get("color", "#999"),
+                "score": round(score, 4),
+            })
+        return results
+
+    def hybrid_search(self, query: str, limit: int = 20) -> list[dict]:
+        """Combine substring matching + TF-IDF semantic for hybrid results."""
+        combined: dict[str, float] = {}
+        q = query.lower()
+
+        # Substring matches get a strong boost
+        for nid, attrs in self.graph.nodes(data=True):
+            label = str(attrs.get("label", "")).lower()
+            nid_lower = nid.lower()
+            if q in nid_lower or q in label:
+                # Exact substring match → high score
+                combined[nid] = 2.0 if q == nid_lower or q == label else 1.5
+
+        # Semantic matches
+        for item in self.semantic_search(query, limit=limit * 2):
+            nid = item["id"]
+            combined[nid] = combined.get(nid, 0) + item["score"]
+
+        ranked = sorted(combined.items(), key=lambda x: x[1], reverse=True)[:limit]
+        results = []
+        for nid, score in ranked:
+            attrs = self.graph.nodes[nid]
+            results.append({
+                "id": nid,
+                "type": attrs.get("type", ""),
+                "label": attrs.get("label", nid),
+                "color": attrs.get("color", "#999"),
+                "score": round(score, 4),
+            })
+        return results
+
+    # ------------------------------------------------------------------
+    # Community Detection (Louvain algorithm)
+    # ------------------------------------------------------------------
+
+    def get_communities(self) -> dict:
+        """Detect communities using the Louvain algorithm."""
+        if self._communities_cache is not None:
+            return self._communities_cache
+
+        undirected = self.graph.to_undirected()
+        communities = louvain_communities(undirected, seed=42)
+
+        assignments: dict[str, int] = {}
+        clusters: list[dict] = []
+        for i, community in enumerate(sorted(communities, key=len, reverse=True)):
+            for node_id in community:
+                assignments[node_id] = i
+            types_in_cluster: dict[str, int] = defaultdict(int)
+            for nid in community:
+                ntype = self.graph.nodes[nid].get("type", "Unknown")
+                types_in_cluster[ntype] += 1
+            clusters.append({
+                "clusterId": i,
+                "size": len(community),
+                "nodeTypes": dict(types_in_cluster),
+                "sampleNodes": sorted(community)[:10],
+            })
+
+        self._communities_cache = {
+            "totalClusters": len(communities),
+            "assignments": assignments,
+            "clusters": clusters,
+        }
+        log.info("Detected %d communities via Louvain", len(communities))
+        return self._communities_cache
+
+    # ------------------------------------------------------------------
+    # Centrality Metrics
+    # ------------------------------------------------------------------
+
+    def get_centrality(self) -> dict:
+        """Compute degree, betweenness, and PageRank centrality."""
+        if self._centrality_cache is not None:
+            return self._centrality_cache
+
+        undirected = self.graph.to_undirected()
+
+        degree = nx.degree_centrality(self.graph)
+        betweenness = nx.betweenness_centrality(
+            undirected, k=min(100, len(undirected))
+        )
+        pagerank = nx.pagerank(self.graph, max_iter=100)
+
+        def _node_info(nid: str, score: float) -> dict:
+            attrs = self.graph.nodes[nid]
+            return {
+                "id": nid,
+                "type": attrs.get("type", ""),
+                "label": attrs.get("label", nid),
+                "score": round(score, 6),
+            }
+
+        top_n = 20
+        self._centrality_cache = {
+            "degree": [
+                _node_info(nid, s)
+                for nid, s in sorted(degree.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            ],
+            "betweenness": [
+                _node_info(nid, s)
+                for nid, s in sorted(betweenness.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            ],
+            "pagerank": [
+                _node_info(nid, s)
+                for nid, s in sorted(pagerank.items(), key=lambda x: x[1], reverse=True)[:top_n]
+            ],
+        }
+        log.info("Centrality metrics computed")
+        return self._centrality_cache

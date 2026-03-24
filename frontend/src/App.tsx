@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { Sun, Moon, BarChart3, Box, Layers, TrendingUp, Route, Filter } from "lucide-react";
+import { Sun, Moon, BarChart3, Box, Layers, TrendingUp, Route, Filter, Network } from "lucide-react";
 import GraphCanvas from "./components/GraphCanvas";
 import ChatPanel from "./components/ChatPanel";
 import NodeInspector from "./components/NodeInspector";
 import SearchBar from "./components/SearchBar";
 import AnalyticsDashboard from "./components/AnalyticsDashboard";
 import PathFinder from "./components/PathFinder";
+import GraphIntelligence from "./components/GraphIntelligence";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { Toolbar, Button, Spinner, Badge } from "./components/ui";
 import { useTheme } from "./components/providers/ThemeProvider";
@@ -25,6 +26,8 @@ export default function App() {
   const [mode3D, setMode3D] = useState(true);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showPathFinder, setShowPathFinder] = useState(false);
+  const [showIntelligence, setShowIntelligence] = useState(false);
+  const [clusterAssignments, setClusterAssignments] = useState<Record<string, number> | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -65,6 +68,7 @@ export default function App() {
         setSelectedNode(null);
         setShowAnalytics(false);
         setShowPathFinder(false);
+        setShowIntelligence(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -126,6 +130,9 @@ export default function App() {
             <Button variant="ghost" size="sm" onClick={() => setShowAnalytics(!showAnalytics)} icon={<TrendingUp size={14} />}>
               Analytics
             </Button>
+            <Button variant="ghost" size="sm" onClick={() => setShowIntelligence(!showIntelligence)} icon={<Network size={14} />}>
+              Intelligence
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowPathFinder(!showPathFinder)} icon={<Route size={14} />}>
               Path
             </Button>
@@ -153,6 +160,7 @@ export default function App() {
               highlightNodes={highlightNodes}
               selectedNode={selectedNode}
               mode3D={mode3D}
+              clusterAssignments={clusterAssignments}
             />
           )}
 
@@ -224,6 +232,15 @@ export default function App() {
           {/* Analytics Dashboard overlay */}
           {showAnalytics && (
             <AnalyticsDashboard onClose={() => setShowAnalytics(false)} />
+          )}
+
+          {/* Graph Intelligence overlay */}
+          {showIntelligence && (
+            <GraphIntelligence
+              onClose={() => setShowIntelligence(false)}
+              onHighlightCluster={handleHighlight}
+              onClusterMode={setClusterAssignments}
+            />
           )}
         </div>
 

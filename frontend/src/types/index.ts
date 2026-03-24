@@ -89,6 +89,36 @@ export interface PathResult {
   error?: string;
 }
 
+/* ── Communities / Clustering ── */
+
+export interface ClusterInfo {
+  clusterId: number;
+  size: number;
+  nodeTypes: Record<string, number>;
+  sampleNodes: string[];
+}
+
+export interface CommunitiesData {
+  totalClusters: number;
+  assignments: Record<string, number>;
+  clusters: ClusterInfo[];
+}
+
+/* ── Centrality ── */
+
+export interface CentralityNode {
+  id: string;
+  type: string;
+  label: string;
+  score: number;
+}
+
+export interface CentralityData {
+  degree: CentralityNode[];
+  betweenness: CentralityNode[];
+  pagerank: CentralityNode[];
+}
+
 /* ── Entity colour map (matches backend PALETTE) ── */
 
 export const ENTITY_COLORS: Record<string, string> = {

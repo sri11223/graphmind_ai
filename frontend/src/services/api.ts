@@ -1,4 +1,4 @@
-import type { GraphData, NodeDetail, ChatApiResponse, GraphStats, AnalyticsData, PathResult } from "../types";
+import type { GraphData, NodeDetail, ChatApiResponse, GraphStats, AnalyticsData, PathResult, CommunitiesData, CentralityData } from "../types";
 
 const BASE = (import.meta.env.VITE_API_URL || "") + "/api";
 
@@ -62,4 +62,12 @@ export async function exportData(data: Record<string, unknown>[], format: "csv" 
   });
   if (!res.ok) throw new Error(`Export failed: ${res.status}`);
   return res.blob();
+}
+
+export async function getCommunities(): Promise<CommunitiesData> {
+  return fetchJson<CommunitiesData>(`${BASE}/graph/communities`);
+}
+
+export async function getCentrality(): Promise<CentralityData> {
+  return fetchJson<CentralityData>(`${BASE}/graph/centrality`);
 }

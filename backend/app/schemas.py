@@ -80,6 +80,7 @@ class SearchResult(BaseModel):
     type: str
     label: str
     color: str
+    score: float | None = Field(None, description="Relevance score for semantic/hybrid search")
 
 
 class StatsResponse(BaseModel):
@@ -155,3 +156,37 @@ class ErrorResponse(BaseModel):
     """Standard error envelope for all non-2xx responses."""
     error: str
     detail: str | None = None
+
+
+# ── Community / Clustering ───────────────────────────────────────
+
+class ClusterInfo(BaseModel):
+    """One community detected by Louvain algorithm."""
+    clusterId: int
+    size: int
+    nodeTypes: dict[str, int] = Field(default_factory=dict)
+    sampleNodes: list[str] = Field(default_factory=list)
+
+
+class CommunitiesResponse(BaseModel):
+    """Community detection results."""
+    totalClusters: int
+    assignments: dict[str, int] = Field(..., description="node_id → cluster_id mapping")
+    clusters: list[ClusterInfo]
+
+
+# ── Centrality ───────────────────────────────────────────────────
+
+class CentralityNode(BaseModel):
+    """A node with its centrality score."""
+    id: str
+    type: str
+    label: str
+    score: float
+
+
+class CentralityResponse(BaseModel):
+    """Top nodes by degree, betweenness, and PageRank centrality."""
+    degree: list[CentralityNode]
+    betweenness: list[CentralityNode]
+    pagerank: list[CentralityNode]
