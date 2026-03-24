@@ -1,4 +1,9 @@
-"""Chat API endpoints — REST + WebSocket streaming + export."""
+"""Chat API endpoints — REST + WebSocket streaming + export.
+
+Provides the natural-language query interface. The REST endpoint returns
+a complete response; the WebSocket endpoint streams partial results so
+the frontend can show progressive updates.
+"""
 
 import csv
 import io
@@ -6,7 +11,7 @@ import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from ..schemas import ChatRequest, ChatResponse, ExportRequest
+from ..schemas import ChatRequest, ChatResponse, ExportRequest, Suggestion
 from ..query_engine import QueryEngine
 from ..guardrails import validate_sql, is_off_topic, REFUSAL_MSG
 from ..database import execute_query
@@ -23,15 +28,24 @@ def init_router(engine: QueryEngine):
     _engine = engine
 
 
-@router.post("", response_model=ChatResponse)
+@router.post(
+    "",
+    response_model=ChatResponse,
+    summary="Ask a question",
+    description="Send a natural-language question about SAP O2C data. Returns SQL, result data, and a narrative answer.",
+)
 def chat(req: ChatRequest):
     result = _engine.process(req.message, req.history)
     return ChatResponse(**result)
 
 
-@router.get("/suggestions")
+@router.get(
+    "/suggestions",
+    response_model=list[Suggestion],
+    summary="Example queries",
+    description="Returns a curated list of example questions the user can try.",
+)
 def suggestions():
-    """Return a list of example queries the user can try."""
     return [
         {"text": "Show me the top 10 customers by order value", "category": "Customers"},
         {"text": "Which products have the most billing documents?", "category": "Products"},
@@ -46,9 +60,12 @@ def suggestions():
     ]
 
 
-@router.post("/export")
+@router.post(
+    "/export",
+    summary="Export data",
+    description="Export query result rows as a downloadable CSV or JSON file.",
+)
 def export_data(req: ExportRequest):
-    """Export query result data as CSV or JSON download."""
     data = req.data
     fmt = req.format
 

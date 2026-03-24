@@ -8,4 +8,10 @@ __pycache__
 .env
 graphmind.db
 *.db
+*.db-wal
+*.db-shm
 .qodo
+.github
+.vscode
+*.md
+LICENSE

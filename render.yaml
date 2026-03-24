@@ -6,6 +6,7 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
+    healthCheckPath: /api/health
     envVars:
       - key: GROQ_API_KEY
         sync: false
@@ -14,4 +15,4 @@ services:
       - key: GROQ_BASE_URL
         value: https://api.groq.com/openai/v1
       - key: CORS_ORIGINS
-        value: "*"
+        value: https://graphmind-ai-sigma.vercel.app,https://graphmind-ai.vercel.app
