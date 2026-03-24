@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { X, ArrowRight, ArrowLeft, Zap } from "lucide-react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { X, ArrowRight, ArrowLeft, Zap, GripVertical } from "lucide-react";
 import { getNodeDetail } from "../services/api";
 import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
@@ -18,11 +18,44 @@ const HIDDEN_KEYS = new Set(["type", "label", "color", "val", "x", "y", "vx", "v
 
 export default function NodeInspector({ node, onClose, onNavigate, onHighlightNeighbors }: Props) {
   const [detail, setDetail] = useState<NodeDetail | null>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const dragging = useRef(false);
+  const dragOffset = useRef({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Reset position when node changes
+  useEffect(() => { setPos(null); }, [node.id]);
 
   useEffect(() => {
     setDetail(null);
     getNodeDetail(node.id).then(setDetail).catch(console.error);
   }, [node.id]);
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return; // don't drag on button clicks
+    e.preventDefault();
+    dragging.current = true;
+    const rect = panelRef.current!.getBoundingClientRect();
+    dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      const parent = panelRef.current?.offsetParent as HTMLElement;
+      const pRect = parent?.getBoundingClientRect() ?? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+      const panelW = panelRef.current?.offsetWidth ?? 320;
+      const panelH = panelRef.current?.offsetHeight ?? 400;
+      const x = Math.max(0, Math.min(ev.clientX - pRect.left - dragOffset.current.x, pRect.width - panelW));
+      const y = Math.max(0, Math.min(ev.clientY - pRect.top - dragOffset.current.y, pRect.height - panelH));
+      setPos({ x, y });
+    };
+    const onUp = () => { dragging.current = false; window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
+  const style = pos
+    ? { left: pos.x, top: pos.y, right: "auto" }
+    : { top: "12px", right: "416px" };
 
   const props = detail?.properties ?? {};
   const displayProps = Object.entries(props).filter(
@@ -30,10 +63,18 @@ export default function NodeInspector({ node, onClose, onNavigate, onHighlightNe
   );
 
   return (
-    <div className="absolute top-3 right-[416px] w-80 max-h-[80vh] bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 flex flex-col z-20 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-gray-800">
+    <div
+      ref={panelRef}
+      className="absolute w-80 max-h-[80vh] bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 flex flex-col z-20 overflow-hidden"
+      style={{ ...style, userSelect: dragging.current ? "none" : undefined }}
+    >
+      {/* Header — drag handle */}
+      <div
+        className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 cursor-grab active:cursor-grabbing select-none"
+        onMouseDown={onMouseDown}
+      >
         <div className="flex items-center gap-2 min-w-0">
+          <GripVertical size={12} className="text-gray-300 dark:text-gray-600 flex-shrink-0" />
           <Badge color={node.color} size="md">{node.type}</Badge>
           <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate ml-1">{node.id}</p>
         </div>
