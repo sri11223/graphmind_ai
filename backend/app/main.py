@@ -218,7 +218,8 @@ if _STATIC_DIR.is_dir():
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         """Catch-all: serve index.html for client-side routing."""
-        file_path = _STATIC_DIR / full_path
-        if file_path.is_file():
+        file_path = (_STATIC_DIR / full_path).resolve()
+        # Guard against path traversal (e.g. ../../backend/app/config.py)
+        if file_path.is_relative_to(_STATIC_DIR) and file_path.is_file():
             return FileResponse(file_path)
         return FileResponse(_STATIC_DIR / "index.html")

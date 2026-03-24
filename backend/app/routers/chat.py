@@ -9,7 +9,9 @@ import csv
 import io
 import json
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import time
+from collections import defaultdict
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import StreamingResponse
 from ..schemas import ChatRequest, ChatResponse, ExportRequest, Suggestion
 from ..query_engine import QueryEngine
@@ -19,6 +21,28 @@ from ..database import execute_query
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+# ---------------------------------------------------------------------------
+# Simple in-process rate limiter — 20 requests per IP per 60 seconds.
+# Protects the Groq API key from runaway usage.
+# ---------------------------------------------------------------------------
+_RATE_LIMIT = 20       # max requests
+_RATE_WINDOW = 60      # seconds
+_rate_buckets: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_rate_limit(ip: str) -> None:
+    now = time.time()
+    window_start = now - _RATE_WINDOW
+    bucket = _rate_buckets[ip]
+    # Evict timestamps outside the current window
+    _rate_buckets[ip] = [t for t in bucket if t > window_start]
+    if len(_rate_buckets[ip]) >= _RATE_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Rate limit exceeded — max {_RATE_LIMIT} requests per {_RATE_WINDOW}s.",
+        )
+    _rate_buckets[ip].append(now)
 
 _engine: QueryEngine | None = None
 
@@ -34,7 +58,8 @@ def init_router(engine: QueryEngine):
     summary="Ask a question",
     description="Send a natural-language question about SAP O2C data. Returns SQL, result data, and a narrative answer.",
 )
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, request: Request):
+    _check_rate_limit(request.client.host if request.client else "unknown")
     result = _engine.process(req.message, req.history)
     return ChatResponse(**result)
 
@@ -99,11 +124,22 @@ def export_data(req: ExportRequest):
 async def chat_stream(websocket: WebSocket):
     """WebSocket endpoint that streams the LLM interpretation step."""
     await websocket.accept()
+    client_ip = websocket.client.host if websocket.client else "unknown"
     try:
         while True:
             data = await websocket.receive_json()
             question = data.get("message", "")
             history = data.get("history", [])
+
+            # Rate limit per client IP
+            try:
+                _check_rate_limit(client_ip)
+            except HTTPException:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Rate limit exceeded — max {_RATE_LIMIT} requests per {_RATE_WINDOW}s.",
+                })
+                continue
 
             # Guardrail: off-topic check
             if is_off_topic(question):

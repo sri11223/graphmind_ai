@@ -1,6 +1,7 @@
-import { useRef, useEffect, useCallback, useState, useMemo } from "react";
+import { memo, useRef, useEffect, useCallback, useState, useMemo, lazy, Suspense } from "react";
 import ForceGraph2D from "react-force-graph-2d";
-import ForceGraph3D from "react-force-graph-3d";
+// Lazy-load the 3D bundle (~800 KB Three.js) only when 3D mode is first activated
+const ForceGraph3D = lazy(() => import("react-force-graph-3d"));
 import * as THREE from "three";
 import { useTheme } from "./providers/ThemeProvider";
 import type { GraphData, GraphNode } from "../types";
@@ -19,7 +20,7 @@ const CLUSTER_PALETTE = [
   "#06B6D4", "#EF4444", "#84CC16", "#F97316", "#6366F1",
 ];
 
-export default function GraphCanvas({ data, onNodeClick, highlightNodes, selectedNode, mode3D, clusterAssignments }: Props) {
+function GraphCanvas({ data, onNodeClick, highlightNodes, selectedNode, mode3D, clusterAssignments }: Props) {
   const { theme } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);
@@ -230,7 +231,12 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
   return (
     <div ref={containerRef} className="w-full h-full relative" onMouseMove={handleMouseMove}>
       {mode3D ? (
-        <ForceGraph3D
+        <Suspense fallback={
+          <div className="w-full h-full flex items-center justify-center text-sm opacity-60">
+            Loading 3D engine…
+          </div>
+        }>
+          <ForceGraph3D
           ref={fgRef}
           graphData={graphData}
           width={dimensions.width}
@@ -254,6 +260,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
           d3VelocityDecay={0.35}
           onEngineStop={() => fgRef.current?.zoomToFit(400, 80)}
         />
+        </Suspense>
       ) : (
         <ForceGraph2D
           ref={fgRef}
@@ -303,3 +310,5 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
     </div>
   );
 }
+
+export default memo(GraphCanvas);
