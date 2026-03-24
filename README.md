@@ -51,6 +51,7 @@ GraphMind AI ingests SAP O2C transactional data, builds an in-memory knowledge g
 ## Features
 
 - **3D/2D Interactive Graph** — Orbit, zoom, rotate. Toggle between 3D (Three.js) and 2D (Canvas) modes. Animated link particles, glow effects, fly-to camera.
+- **Entity Type Filters** — Click any entity type (SalesOrder, Customer, Product, etc.) to activate/deactivate it. Inactive entities are hidden from the graph view. Click again to show them.
 - **Natural Language Queries** — Ask questions in plain English, get SQL + results + narrative answers.
 - **WebSocket Streaming** — Real-time streamed responses with progress indicators.
 - **Auto-Retry SQL** — If the LLM generates bad SQL, it auto-detects the error and self-corrects.
@@ -59,6 +60,30 @@ GraphMind AI ingests SAP O2C transactional data, builds an in-memory knowledge g
 - **Node Inspector** — Click any node to see properties + navigate to neighbors.
 - **Graph Search** — Debounced fuzzy search across all 669 nodes.
 - **Guardrails** — 3-layer safety: keyword filter, LLM refusal, SQL validator (SELECT only).
+
+---
+
+## 🚀 PathFinder: Trace O2C Flows
+
+**Try this first** — Click on any node in the graph (e.g., a Sales Order), then hold **Shift** and click another node (e.g., a Payment). The system highlights the shortest path connecting them, revealing the exact O2C flow. This interactive exploration is the best way to understand how SAP orders flow from creation to payment settlement.
+
+Example: `SalesOrder(740506)` → Delivery → BillingDocument → JournalEntry → Payment (interactive path tracing)
+
+---
+
+## 🔍 Live Graph Search & Filter
+
+**Interactive exploration** — Type any product name, customer ID, or sales order number in the **Search** box at the top. The graph updates in real-time to highlight matching nodes. Click on any node to select it and see its properties in the inspector panel. Inactive entity types are automatically filtered out (toggle entity types in the left panel to show/hide them).
+
+Example: Type `"P-100"` → see all nodes containing "P-100" (products, orders, etc.) highlighted in the graph instantly.
+
+---
+
+## 🎛️ Entity Type Filters
+
+**Control what you see** — Panel on the left shows all 8 entity types (SalesOrder, BillingDocument, Payment, Product, Delivery, Customer, Plant, JournalEntry) with node counts. Click any entity type to toggle it on/off. Inactive entities instantly disappear from the graph. Click again to bring them back. 
+
+**Use case:** Want to see only order and payment flows? Deactivate products and plants to simplify the view.
 
 ---
 
