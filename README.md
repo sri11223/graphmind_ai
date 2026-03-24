@@ -62,69 +62,14 @@ GraphMind AI ingests SAP O2C transactional data, builds an in-memory knowledge g
 
 ---
 
-## Deployment Guide
+## Local Development
 
-### Option A: Split Deployment (Recommended)
-
-**Frontend → Vercel** | **Backend → Render** | **Database → SQLite (in container)**
-
-#### Step 1: Deploy Backend on Render
-
-1. Push code to GitHub
-2. Go to [render.com](https://render.com) → **New → Web Service**
-3. Connect your GitHub repo (`sri11223/graphmind_ai`)
-4. Render auto-detects `render.yaml`. Settings:
-   - **Name**: `graphmind-ai-api`
-   - **Runtime**: Docker
-   - **Plan**: Free
-5. Add environment variable:
-   - `GROQ_API_KEY` = your key from [console.groq.com](https://console.groq.com) (free)
-6. Click **Deploy**
-7. Note your URL: `https://graphmind-ai-api.onrender.com`
-
-> On first startup, the server creates the SQLite DB and ingests all 21,000+ records from JSONL files (~10 seconds).
-
-#### Step 2: Deploy Frontend on Vercel
-
-1. Go to [vercel.com](https://vercel.com) → **New Project**
-2. Import the same GitHub repo
-3. Configure:
-   - **Framework**: Vite
-   - **Root Directory**: leave as `.` (vercel.json handles it)
-   - **Build Command**: `cd frontend && npm install && npm run build`
-   - **Output Directory**: `frontend/dist`
-4. Add environment variable:
-   - `VITE_API_URL` = `https://graphmind-ai-api.onrender.com` (your Render URL from Step 1)
-5. Click **Deploy**
-
-#### Step 3: Update CORS on Render
-
-Go to your Render service → **Environment** → update:
-- `CORS_ORIGINS` = `https://graphmind-ai.vercel.app` (your Vercel URL)
-
-Redeploy the backend.
-
----
-
-### Option B: Docker (All-in-One)
-
-```bash
-docker build -t graphmind-ai .
-docker run -p 8000:8000 -e GROQ_API_KEY=your_key_here graphmind-ai
-```
-
-Open **http://localhost:8000**
-
----
-
-### Option C: Local Development
-
-#### Prerequisites
+### Prerequisites
 - Python 3.11+
 - Node.js 18+
 - Groq API key (free — [console.groq.com](https://console.groq.com))
 
-#### Backend
+### Backend Setup
 
 ```bash
 cd backend
@@ -141,7 +86,9 @@ cd ..
 python -m uvicorn backend.app.main:app --reload --port 8000
 ```
 
-#### Frontend
+API docs available at: **http://localhost:8000/docs**
+
+### Frontend Setup
 
 ```bash
 cd frontend
@@ -150,25 +97,6 @@ npm run dev
 ```
 
 Open **http://localhost:5173** — Vite proxies `/api` to the backend automatically.
-
----
-
-## Environment Variables
-
-### Backend (Render)
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GROQ_API_KEY` | Yes | — | Groq API key ([free](https://console.groq.com)) |
-| `GROQ_MODEL` | No | `llama-3.3-70b-versatile` | LLM model |
-| `GROQ_BASE_URL` | No | `https://api.groq.com/openai/v1` | API endpoint |
-| `CORS_ORIGINS` | No | `*` | Comma-separated allowed origins |
-
-### Frontend (Vercel)
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `VITE_API_URL` | Yes (production) | `` (same origin) | Backend URL, e.g. `https://graphmind-ai-api.onrender.com` |
 
 ---
 
@@ -267,3 +195,15 @@ Customer ← SOLD_TO ← Sales Order → ORDERED_PRODUCT → Product
 | Styling | Tailwind CSS 3 | Utility-first, dark mode support |
 | Frontend Hosting | Vercel | Free, fast CDN, zero-config |
 | Backend Hosting | Render | Free, Docker support, auto-deploy |
+
+---
+
+## Architecture & Design Documentation
+
+For comprehensive details on design trade-offs, architecture decisions, and implementation strategies, see:
+
+- **[Architecture Overview](docs/architecture.md)** — System design, high-level flow, request/response pipeline
+- **[Database Design](docs/database.md)** — Schema, indexes, views, query optimization, WAL mode
+- **[Graph Engine](docs/graph-engine.md)** — Entity types, edge relationships, centrality algorithms, search strategies
+- **[LLM Strategy](docs/llm-strategy.md)** — Two-stage NL→SQL pipeline, temperature tuning, result interpretation
+- **[Guardrails & Security](docs/guardrails.md)** — SQL validation, input sanitization, rate limiting, attack prevention
