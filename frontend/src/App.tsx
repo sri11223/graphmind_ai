@@ -76,6 +76,7 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setSelectedNode(null);
+        setHighlightNodes(new Set());
         setShowAnalytics(false);
         setShowPathFinder(false);
         setShowIntelligence(false);
@@ -94,9 +95,28 @@ export default function App() {
     });
   }, []);
 
-  const handleNodeClick = useCallback((node: GraphNode) => setSelectedNode(node), []);
+  const handleNodeClick = useCallback(
+    (node: GraphNode) => {
+      setSelectedNode(node);
+      // Auto-highlight the clicked node + its 1-hop neighbors
+      if (graphData) {
+        const ids = new Set<string>([node.id]);
+        for (const link of graphData.links) {
+          const src = typeof link.source === "string" ? link.source : link.source.id;
+          const tgt = typeof link.target === "string" ? link.target : link.target.id;
+          if (src === node.id) ids.add(tgt);
+          if (tgt === node.id) ids.add(src);
+        }
+        setHighlightNodes(ids);
+      }
+    },
+    [graphData]
+  );
   const handleHighlight = useCallback((ids: string[]) => setHighlightNodes(new Set(ids)), []);
-  const handleClearSelection = useCallback(() => setSelectedNode(null), []);
+  const handleClearSelection = useCallback(() => {
+    setSelectedNode(null);
+    setHighlightNodes(new Set());
+  }, []);
 
   if (loading) {
     return (
@@ -240,9 +260,10 @@ export default function App() {
               node={selectedNode}
               onClose={handleClearSelection}
               onNavigate={(nodeId) => {
-                const node = graphData?.nodes.find((n) => n.id === nodeId);
-                if (node) setSelectedNode(node);
+                const found = graphData?.nodes.find((n) => n.id === nodeId);
+                if (found) setSelectedNode(found);
               }}
+              onHighlightNeighbors={(ids) => setHighlightNodes(new Set(ids))}
             />
           )}
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, ArrowRight, ArrowLeft } from "lucide-react";
+import { X, ArrowRight, ArrowLeft, Zap } from "lucide-react";
 import { getNodeDetail } from "../services/api";
 import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
@@ -10,12 +10,13 @@ interface Props {
   node: GraphNode;
   onClose: () => void;
   onNavigate: (nodeId: string) => void;
+  onHighlightNeighbors?: (ids: string[]) => void;
 }
 
 // Keys to hide from the property view (internal / redundant)
 const HIDDEN_KEYS = new Set(["type", "label", "color", "val", "x", "y", "vx", "vy", "fx", "fy", "index", "__indexColor"]);
 
-export default function NodeInspector({ node, onClose, onNavigate }: Props) {
+export default function NodeInspector({ node, onClose, onNavigate, onHighlightNeighbors }: Props) {
   const [detail, setDetail] = useState<NodeDetail | null>(null);
 
   useEffect(() => {
@@ -56,14 +57,31 @@ export default function NodeInspector({ node, onClose, onNavigate }: Props) {
         {/* Connections */}
         {detail && detail.neighbors.length > 0 && (
           <>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mt-4 mb-1.5">
-              Connections ({detail.neighbors.length})
-            </p>
+            <div className="flex items-center justify-between mt-4 mb-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                Connections ({detail.neighbors.length})
+              </p>
+              {onHighlightNeighbors && (
+                <button
+                  onClick={() =>
+                    onHighlightNeighbors([node.id, ...detail.neighbors.map((n) => n.id)])
+                  }
+                  className="flex items-center gap-1 text-[10px] text-brand-500 hover:text-brand-600 transition font-medium"
+                  title="Highlight all connections in graph"
+                >
+                  <Zap size={10} />
+                  Highlight All
+                </button>
+              )}
+            </div>
             <ul className="space-y-1 max-h-48 overflow-y-auto">
               {detail.neighbors.map((nb: Neighbor, i: number) => (
                 <li key={i}>
                   <button
-                    onClick={() => onNavigate(nb.id)}
+                    onClick={() => {
+                      onNavigate(nb.id);
+                      onHighlightNeighbors?.([nb.id]);
+                    }}
                     className="w-full flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition text-left group"
                   >
                     {nb.direction === "incoming" ? (

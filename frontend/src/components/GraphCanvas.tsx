@@ -24,6 +24,8 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<any>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [hoveredLink, setHoveredLink] = useState<any>(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
   // Responsive sizing
   useEffect(() => {
@@ -220,8 +222,13 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
   // Memoize data to prevent re-rendering loops
   const graphData = useMemo(() => data, [data]);
 
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  }, []);
+
   return (
-    <div ref={containerRef} className="w-full h-full">
+    <div ref={containerRef} className="w-full h-full relative" onMouseMove={handleMouseMove}>
       {mode3D ? (
         <ForceGraph3D
           ref={fgRef}
@@ -237,6 +244,7 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
           linkDirectionalParticleSpeed={0.006}
           linkDirectionalParticleWidth={1.5}
           linkDirectionalParticleColor={() => "#3b82f6"}
+          onLinkHover={(link) => setHoveredLink(link)}
           enableNodeDrag={true}
           enableNavigationControls={true}
           showNavInfo={false}
@@ -267,12 +275,30 @@ export default function GraphCanvas({ data, onNodeClick, highlightNodes, selecte
           linkDirectionalParticleSpeed={0.004}
           linkDirectionalParticleWidth={2}
           linkDirectionalParticleColor={() => "#3b82f6"}
+          onLinkHover={(link) => setHoveredLink(link)}
           enableNodeDrag={true}
           cooldownTicks={200}
           d3AlphaDecay={0.03}
           d3VelocityDecay={0.4}
           backgroundColor={bgColor}
         />
+      )}
+
+      {/* Edge relationship type tooltip on hover */}
+      {hoveredLink && (
+        <div
+          className="absolute z-30 pointer-events-none px-2 py-1 rounded-md text-[11px] font-medium shadow-lg border whitespace-nowrap"
+          style={{
+            left: mousePos.x + 14,
+            top: Math.max(4, mousePos.y - 30),
+            backgroundColor: theme === "dark" ? "rgba(17,24,39,0.95)" : "rgba(255,255,255,0.97)",
+            borderColor: theme === "dark" ? "#374151" : "#e5e7eb",
+            color: theme === "dark" ? "#e5e7eb" : "#1f2937",
+          }}
+        >
+          <span className="text-blue-400 mr-1">⟶</span>
+          {(hoveredLink as any).type ?? "–"}
+        </div>
       )}
     </div>
   );
