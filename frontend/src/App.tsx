@@ -23,12 +23,22 @@ export default function App() {
   const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
-  const [mode3D, setMode3D] = useState(true);
+  const [mode3D, setMode3D] = useState(false);
+  const [show3DHint, setShow3DHint] = useState(true);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showPathFinder, setShowPathFinder] = useState(false);
   const [showIntelligence, setShowIntelligence] = useState(false);
   const [clusterAssignments, setClusterAssignments] = useState<Record<string, number> | null>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
+
+  // Auto-show 3D hint whenever switching back to 2D, dismiss after 8s
+  useEffect(() => {
+    if (!mode3D) {
+      setShow3DHint(true);
+      const t = setTimeout(() => setShow3DHint(false), 8000);
+      return () => clearTimeout(t);
+    }
+  }, [mode3D]);
 
   useEffect(() => {
     Promise.all([getGraphData(), getGraphStats()])
@@ -136,8 +146,8 @@ export default function App() {
             <Button variant="ghost" size="sm" onClick={() => setShowPathFinder(!showPathFinder)} icon={<Route size={14} />}>
               Path
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setMode3D(!mode3D)} icon={mode3D ? <Box size={14} /> : <Layers size={14} />}>
-              {mode3D ? "3D" : "2D"}
+            <Button variant="ghost" size="sm" onClick={() => setMode3D(!mode3D)} icon={mode3D ? <Layers size={14} /> : <Box size={14} />}>
+              {mode3D ? "2D View" : "3D View"}
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setShowLegend(!showLegend)} icon={<BarChart3 size={14} />}>
               {showLegend ? "Hide" : "Show"} Legend
@@ -162,6 +172,21 @@ export default function App() {
               mode3D={mode3D}
               clusterAssignments={clusterAssignments}
             />
+          )}
+
+          {/* 3D mode hint tooltip */}
+          {!mode3D && show3DHint && (
+            <div className="absolute bottom-20 right-3 z-20 flex items-center gap-2 bg-blue-600/90 backdrop-blur-sm text-white text-xs font-medium px-3 py-2 rounded-lg shadow-lg border border-blue-500/40 max-w-[230px]">
+              <Box size={13} className="flex-shrink-0 opacity-90" />
+              <span>Try <strong>3D View</strong> in the toolbar above for an interactive 3D visualization!</span>
+              <button
+                onClick={() => setShow3DHint(false)}
+                className="ml-1 flex-shrink-0 hover:text-blue-200 transition-colors"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
           )}
 
           {/* Search bar */}
