@@ -12,8 +12,9 @@ COPY backend/ ./backend/
 # Copy dataset
 COPY sap-o2c-data/ ./sap-o2c-data/
 
-# Create non-root user
-RUN adduser --disabled-password --no-create-home appuser
+# Create non-root user and grant write access (SQLite needs to create .db/.wal/.shm)
+RUN adduser --disabled-password --no-create-home appuser \
+ && chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
